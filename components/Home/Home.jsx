@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { ethers } from 'ethers';
 import NavBar from '../NavBar/NavBar';
-import { Container, Grid, Card, CardMedia, CardContent, Typography, Box } from '@mui/material';
+import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button } from '@mui/material';
 import { MarketPlace_ADDRESS, MarketPlace_ABI, SimpleNFT_ADDRESS, SimpleNFT_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
 
@@ -62,9 +62,28 @@ const Home = () => {
             setListedNFTs(nfts.filter(nft => nft !== null));
         } catch (error) {
             console.error("Error fetching NFTs:", error);
-            setError(error.message);
+           // setError(error.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const buyNFT = async (listingId, price) => {
+        try {
+            const provider = new ethers.providers.Web3Provider(window.ethereum);
+            const signer = provider.getSigner();
+            const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
+
+            const transaction = await marketplaceContract.buyNFT(listingId, {
+                value: ethers.utils.parseEther(price)
+            });
+
+            await transaction.wait();
+            alert("NFT purchased successfully!");
+            fetchListedNFTs(); // Refresh the list after purchase
+        } catch (error) {
+            console.error("Error buying NFT:", error);
+            alert("Failed to buy NFT. Please try again.");
         }
     };
 
@@ -108,6 +127,15 @@ const Home = () => {
                                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                                         Seller: {nft.seller.slice(0, 6)}...{nft.seller.slice(-4)}
                                     </Typography>
+                                    <Button
+                                        variant="contained"
+                                        color="primary"
+                                        fullWidth
+                                        sx={{ mt: 2 }}
+                                        onClick={() => buyNFT(nft.listingId, nft.price)}
+                                    >
+                                        Buy for {nft.price} ETH
+                                    </Button>
                                 </CardContent>
                             </Card>
                         </Grid>
