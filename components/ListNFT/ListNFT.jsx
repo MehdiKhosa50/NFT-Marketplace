@@ -60,8 +60,8 @@ const ListNFT = () => {
             const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
-                    'pinata_api_key': 'b6716659c926343c681a',
-                    'pinata_secret_api_key': '43e1f90d6ffa1c4b4f1a43a9fadfb1bd1f74da38af9cb1d9d47843ab242958bc'
+                    'pinata_api_key': '',
+                    'pinata_secret_api_key': ''
                 }
             });
 
@@ -74,8 +74,8 @@ const ListNFT = () => {
             }, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'pinata_api_key': 'b6716659c926343c681a',
-                    'pinata_secret_api_key': '43e1f90d6ffa1c4b4f1a43a9fadfb1bd1f74da38af9cb1d9d47843ab242958bc',
+                    'pinata_api_key': '',
+                    'pinata_secret_api_key': '',
                 },
             });
 
