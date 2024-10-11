@@ -1,46 +1,84 @@
-import React, { useContext, useState, useRef } from 'react';
+import React, { useContext } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { AppBar, Toolbar, Typography, Button, Box, Container } from '@mui/material';
-
 import { NFTContext } from '../../context/NFTContext';
 
 const NavBar = () => {
     const { account } = useContext(NFTContext);
-    const connectButtonRef = useRef(null);
+    const router = useRouter();
+
+    const isActive = (pathname) => router.pathname === pathname;
 
     return (
-        <AppBar position="static" color="transparent" elevation={0}>
+        <AppBar position="static" color="default" elevation={1}>
             <Container>
-                <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-                        NFT MarketPlace
-                    </Typography>
-                    <Box
-                        sx={{
-                            display: 'flex',
-                            justifyContent: 'center',
-                            gap: 2,
-                            mt: 1,
-                        }}
-                    >
+                <Toolbar sx={{ display: 'flex', justifyContent: 'space-between', py: 1 }}>
+                    <Link href="/" passHref>
+                        <Typography
+                            variant="h6"
+                            component="div"
+                            sx={{
+                                flexGrow: 1,
+                                cursor: 'pointer',
+                                color: 'primary.main',
+                                fontWeight: 'bold'
+                            }}
+                        >
+                            NFT Marketplace
+                        </Typography>
+                    </Link>
+
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                        <Link href="/" passHref>
+                            <Button
+                                color="inherit"
+                                sx={{
+                                    fontWeight: isActive('/') ? 'bold' : 'normal',
+                                    borderBottom: isActive('/') ? 2 : 0,
+                                    borderColor: 'primary.main',
+                                    borderRadius: 0
+                                }}
+                            >
+                                Marketplace
+                            </Button>
+                        </Link>
+
                         <Link href="/ListNFT" passHref>
-                            <Button variant="contained" color="primary" size="large" sx={{ mx: 1 }}>
+                            <Button
+                                color="inherit"
+                                sx={{
+                                    fontWeight: isActive('/ListNFT') ? 'bold' : 'normal',
+                                    borderBottom: isActive('/ListNFT') ? 2 : 0,
+                                    borderColor: 'primary.main',
+                                    borderRadius: 0
+                                }}
+                            >
                                 List NFT
                             </Button>
                         </Link>
-                        <Link href="/profile" passHref>
-                            <Button variant="outlined" color="secondary" size="large" sx={{ mx: 1 }}>
-                                Profile
-                            </Button>
-                        </Link>
-                    </Box>
-                    <Button color="primary" variant="contained">
-                        <div ref={connectButtonRef}>
+
+                        {account && (
+                            <Link href="/profile" passHref>
+                                <Button
+                                    color="inherit"
+                                    sx={{
+                                        fontWeight: isActive('/profile') ? 'bold' : 'normal',
+                                        borderBottom: isActive('/profile') ? 2 : 0,
+                                        borderColor: 'primary.main',
+                                        borderRadius: 0
+                                    }}
+                                >
+                                    My NFTs
+                                </Button>
+                            </Link>
+                        )}
+
+                        <Box sx={{ ml: 2 }}>
                             <ConnectButton />
-                        </div>
-                    </Button>
+                        </Box>
+                    </Box>
                 </Toolbar>
             </Container>
         </AppBar>

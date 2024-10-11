@@ -1,5 +1,5 @@
 export const MarketPlace_ADDRESS = "0x7d350277d46f58406007632b73C0661BB540ddBD";
-export const NFT_ADDRESS = "0xaFEFeD1Dee4259eE87aF49D2ceaeE50cF605a3dE"
+export const SimpleNFT_ADDRESS = "0xaFEFeD1Dee4259eE87aF49D2ceaeE50cF605a3dE"
 export const MarketPlace_ABI = [
 	{
 		"anonymous": false,
@@ -339,7 +339,7 @@ export const MarketPlace_ABI = [
 		"type": "function"
 	}
 ]
-export const NFT_ABI = [
+export const SimpleNFT_ABI = [
 	{
 		"inputs": [],
 		"stateMutability": "nonpayable",
