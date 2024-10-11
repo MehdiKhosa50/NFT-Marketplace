@@ -30,6 +30,15 @@ const Profile = () => {
             console.log("Marketplace contract:", marketplaceContract);
             console.log("SimpleNFT contract:", simpleNFTContract);
 
+            // Debug: Log all available functions on the contract
+            console.log("Available functions:", Object.keys(marketplaceContract.functions));
+
+            // Check if the function exists
+            if (typeof marketplaceContract.getSellerListingIds !== 'function') {
+                throw new Error("getSellerListingIds function does not exist on the contract");
+            }
+
+            console.log("Calling getSellerListingIds with account:", account);
             const sellerListingIds = await marketplaceContract.getSellerListingIds(account);
             console.log("Seller Listing IDs:", sellerListingIds);
 
@@ -57,7 +66,7 @@ const Profile = () => {
             setUserNFTs(nfts.filter(nft => nft !== null));
         } catch (error) {
             console.error("Error fetching user NFTs:", error);
-            setError(error.message);
+            setError(error.message || "An unknown error occurred");
         } finally {
             setLoading(false);
         }
@@ -81,7 +90,7 @@ const Profile = () => {
             fetchUserNFTs();
         } catch (error) {
             console.error("Error canceling listing:", error);
-            setError(error.message);
+            setError(error.message || "An unknown error occurred while canceling the listing");
         }
     };
 
@@ -92,7 +101,12 @@ const Profile = () => {
             {loading ? (
                 <Typography>Loading your NFTs...</Typography>
             ) : error ? (
-                <Typography color="error">Error: {error}</Typography>
+                <Box>
+                    <Typography color="error">Error: {error}</Typography>
+                    <Button onClick={fetchUserNFTs} variant="contained" sx={{ mt: 2 }}>
+                        Retry
+                    </Button>
+                </Box>
             ) : userNFTs.length > 0 ? (
                 <Grid container spacing={3}>
                     {userNFTs.map((nft) => (
@@ -104,6 +118,10 @@ const Profile = () => {
                                         alt={nft.name}
                                         layout="fill"
                                         objectFit="cover"
+                                        onError={(e) => {
+                                            e.target.onerror = null;
+                                            e.target.src = "/placeholder-image.png"; // Replace with your placeholder image path
+                                        }}
                                     />
                                 </Box>
                                 <CardContent>
