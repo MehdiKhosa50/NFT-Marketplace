@@ -25,7 +25,7 @@ const NavBar = () => {
                             mt: 1,
                         }}
                     >
-                        <Link href="/" passHref>
+                        <Link href="/ListNFT" passHref>
                             <Button variant="contained" color="primary" size="large" sx={{ mx: 1 }}>
                                 List NFT
                             </Button>
