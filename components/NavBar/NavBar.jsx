@@ -2,14 +2,24 @@ import React, { useContext } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { AppBar, Toolbar, Typography, Button, Box, Container } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, Container, Menu, MenuItem } from '@mui/material';
 import { NFTContext } from '../../context/NFTContext';
 
 const NavBar = () => {
     const { account } = useContext(NFTContext);
     const router = useRouter();
-
     const isActive = (pathname) => router.pathname === pathname;
+
+    // State for controlling the dropdown menu
+    const [anchorEl, setAnchorEl] = React.useState(null);
+
+    const handleMenuOpen = (event) => {
+        setAnchorEl(event.currentTarget);
+    };
+
+    const handleMenuClose = () => {
+        setAnchorEl(null);
+    };
 
     return (
         <AppBar position="static" color="default" elevation={1}>
@@ -45,19 +55,45 @@ const NavBar = () => {
                             </Button>
                         </Link>
 
-                        <Link href="/ListNFT" passHref>
+                        {/* Dropdown for NFT */}
+                        <Box
+                            onMouseEnter={handleMenuOpen}
+                            onMouseLeave={handleMenuClose}
+                            sx={{ position: 'relative' }}
+                        >
                             <Button
                                 color="inherit"
                                 sx={{
-                                    fontWeight: isActive('/ListNFT') ? 'bold' : 'normal',
-                                    borderBottom: isActive('/ListNFT') ? 2 : 0,
+                                    fontWeight: isActive('/nft') ? 'bold' : 'normal',
+                                    borderBottom: isActive('/nft') ? 2 : 0,
                                     borderColor: 'primary.main',
                                     borderRadius: 0
                                 }}
                             >
-                                List NFT
+                                NFT
                             </Button>
-                        </Link>
+
+                            {/* Dropdown Menu */}
+                            <Menu
+                                anchorEl={anchorEl}
+                                open={Boolean(anchorEl)}
+                                onClose={handleMenuClose}
+                                MenuListProps={{
+                                    onMouseLeave: handleMenuClose
+                                }}
+                                PaperProps={{
+                                    elevation: 1,
+                                    sx: { mt: 1 }
+                                }}
+                            >
+                                <Link href="/MintNFT" passHref>
+                                    <MenuItem onClick={handleMenuClose}>Mint NFT</MenuItem>
+                                </Link>
+                                <Link href="/ListNFT" passHref>
+                                    <MenuItem onClick={handleMenuClose}>List NFT</MenuItem>
+                                </Link>
+                            </Menu>
+                        </Box>
 
                         {account && (
                             <Link href="/profile" passHref>
