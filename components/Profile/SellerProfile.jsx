@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useContext, useCallback } from 'react';
 import { ethers } from 'ethers';
-import { Container, Grid, Card, CardContent, Typography, Box, Button } from '@mui/material';
+import { Container, Grid, Card, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
 import { MarketPlace_ADDRESS, MarketPlace_ABI, SimpleNFT_ADDRESS, SimpleNFT_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
 import Image from 'next/image';
 
-const Profile = () => {
+const SellerProfile = () => {
     const { account } = useContext(NFTContext);
     const [userNFTs, setUserNFTs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -13,56 +13,40 @@ const Profile = () => {
 
     const fetchUserNFTs = useCallback(async () => {
         if (!account) return;
+        setLoading(true);
         setError(null);
         try {
-            const provider = new ethers.providers.Web3Provider(window.ethereum);
-
-            console.log("MarketPlace_ABI:", MarketPlace_ABI);
-            console.log("SimpleNFT_ABI:", SimpleNFT_ABI);
-
-            if (!MarketPlace_ABI || !SimpleNFT_ABI) {
-                throw new Error("Contract ABI is undefined");
-            }
-
-            const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, provider);
-            const simpleNFTContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, provider);
-
-            console.log("Marketplace contract:", marketplaceContract);
-            console.log("SimpleNFT contract:", simpleNFTContract);
-
-            // Debug: Log all available functions on the contract
-            console.log("Available functions:", Object.keys(marketplaceContract.functions));
-
-            // Check if the function exists
-            if (typeof marketplaceContract.getSellerListingIds !== 'function') {
-                throw new Error("getSellerListingIds function does not exist on the contract");
-            }
-
-            console.log("Calling getSellerListingIds with account:", account);
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+    
+            const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
+            const simpleNFTContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
+    
             const sellerListingIds = await marketplaceContract.getSellerListingIds(account);
             console.log("Seller Listing IDs:", sellerListingIds);
-
-            if (!Array.isArray(sellerListingIds)) {
-                throw new Error("getSellerListingIds did not return an array");
-            }
-
+    
             const nfts = await Promise.all(sellerListingIds.map(async (id) => {
                 const listing = await marketplaceContract.listings(id);
-                if (!listing.isActive) return null;
+                
+                // Check if the listing is active
+                if (!listing.isListed) {
+                    return null;
+                }
 
                 const tokenURI = await simpleNFTContract.tokenURI(listing.tokenId);
                 const response = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
                 const metadata = await response.json();
-
+    
                 return {
                     id: listing.tokenId.toString(),
                     listingId: id.toString(),
                     image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'),
                     name: metadata.name,
-                    price: ethers.utils.formatEther(listing.price),
+                    price: ethers.formatEther(listing.price),
+                    isListed: listing.isListed
                 };
             }));
-
+    
             setUserNFTs(nfts.filter(nft => nft !== null));
         } catch (error) {
             console.error("Error fetching user NFTs:", error);
@@ -80,8 +64,8 @@ const Profile = () => {
 
     const cancelListing = async (listingId) => {
         try {
-            const provider = new ethers.providers.Web3Provider(window.ethereum);
-            const signer = provider.getSigner();
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
             const contract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
 
             const tx = await contract.cancelListing(listingId);
@@ -99,10 +83,10 @@ const Profile = () => {
             <Typography variant="h4" sx={{ mt: 4, mb: 3 }}>Your Listed NFTs</Typography>
 
             {loading ? (
-                <Typography>Loading your NFTs...</Typography>
+                <CircularProgress />
             ) : error ? (
                 <Box>
-                    <Typography color="error">Error: {error}</Typography>
+                    <Typography color="error">{error}</Typography>
                     <Button onClick={fetchUserNFTs} variant="contained" sx={{ mt: 2 }}>
                         Retry
                     </Button>
@@ -118,10 +102,6 @@ const Profile = () => {
                                         alt={nft.name}
                                         layout="fill"
                                         objectFit="cover"
-                                        onError={(e) => {
-                                            e.target.onerror = null;
-                                            e.target.src = "/placeholder-image.png"; // Replace with your placeholder image path
-                                        }}
                                     />
                                 </Box>
                                 <CardContent>
@@ -155,10 +135,10 @@ const Profile = () => {
                     ))}
                 </Grid>
             ) : (
-                <Typography>You haven&apos;t listed any NFTs yet.</Typography>
+                <Typography>You haven't listed any NFTs yet.</Typography>
             )}
         </Container>
     );
 };
 
-export default Profile;
+export default SellerProfile;
