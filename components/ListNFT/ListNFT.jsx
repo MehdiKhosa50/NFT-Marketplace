@@ -47,7 +47,6 @@ const ListNFT = () => {
         }
     }, [account]);
 
-<<<<<<< HEAD
     const fetchUserNFTs = useCallback(async () => {
         console.log("Fetching user NFTs...");
         console.log("NFT Contract:", nftContract ? "Available" : "Not available");
@@ -57,47 +56,6 @@ const ListNFT = () => {
             console.log("NFT contract or account not available");
             setError("Unable to fetch NFTs. Please ensure your wallet is connected.");
             return;
-=======
-    const handleFileChange = (event) => {
-        const selectedFile = event.target.files[0];
-        setFile(selectedFile);
-        const url = URL.createObjectURL(selectedFile);
-        setPreviewUrl(url);
-    };
-
-    const uploadToPinata = async () => {
-        if (!file) return null;
-        try {
-            const formData = new FormData();
-            formData.append('file', file);
-
-            const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    'pinata_api_key': '',
-                    'pinata_secret_api_key': ''
-                }
-            });
-
-            const imgHash = response.data.IpfsHash;
-
-            const metadataResponse = await axios.post('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-                name,
-                description,
-                image: `ipfs://${imgHash}`,
-            }, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'pinata_api_key': '',
-                    'pinata_secret_api_key': '',
-                },
-            });
-
-            return metadataResponse.data.IpfsHash;
-        } catch (error) {
-            console.error('Error uploading to Pinata:', error);
-            return null;
->>>>>>> b56d46b5e8e7a345b4b74bced26b02a2847397cc
         }
         setLoading(true);
         setError(null);
