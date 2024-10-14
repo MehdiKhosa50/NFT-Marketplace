@@ -34,7 +34,7 @@ export const NFTContextProvider = ({ children }) => {
         try {
             if (signer) {
                 if (window.ethereum) {
-                    const web3Provider = new ethers.providers.Web3Provider(window.ethereum);
+                    const web3Provider = new ethers.BrowserProvider(window.ethereum);
                     const signerInstance = await web3Provider.getSigner();
                     return new ethers.Contract(contractAddress, abi, signerInstance);
                 } else {
