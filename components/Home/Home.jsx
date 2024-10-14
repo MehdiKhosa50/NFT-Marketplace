@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { ethers } from 'ethers';
 import NavBar from '../NavBar/NavBar';
-import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button } from '@mui/material';
+import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
 import { MarketPlace_ADDRESS, MarketPlace_ABI, SimpleNFT_ADDRESS, SimpleNFT_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
 
@@ -12,88 +12,89 @@ const Home = () => {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        if (typeof window.ethereum !== 'undefined') {
+        if (typeof window.ethereum !== 'undefined' && account) {
             fetchListedNFTs();
         }
     }, [account]);
-
+    
     const fetchListedNFTs = async () => {
         setError(null);
+        setLoading(true);
         try {
-            const provider = new ethers.providers.Web3Provider(window.ethereum);
-            console.log("Provider: ", provider);
-
-            if (!MarketPlace_ABI || !SimpleNFT_ABI) {
-                throw new Error("Contract ABI is undefined");
-            }
-
-            const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, provider);
-            const simpleNFTContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, provider);
-
-            console.log("Marketplace contract:", marketplaceContract);
-            console.log("SimpleNFT contract:", simpleNFTContract);
-
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+    
+            const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
+            const simpleNFTContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
+    
             const listingIds = await marketplaceContract.getListingIds();
             console.log("Listing IDs:", listingIds);
-
-            if (!Array.isArray(listingIds)) {
-                throw new Error("getListingIds did not return an array");
-            }
-
+    
             const nfts = await Promise.all(listingIds.map(async (id) => {
-                const listing = await marketplaceContract.listings(id);
-                if (!listing.isActive) return null;
-
-                const tokenURI = await simpleNFTContract.tokenURI(listing.tokenId);
-                console.log("TokenURI: ", tokenURI)
-                const response = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
-                const metadata = await response.json();
-
-                return {
-                    id: listing.tokenId.toString(),
-                    listingId: id.toString(),
-                    image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'),
-                    name: metadata.name,
-                    price: ethers.utils.formatEther(listing.price),
-                    seller: listing.seller
-                };
+                try {
+                    const listing = await marketplaceContract.listings(id);
+                    
+                    if (!listing.isListed) {
+                        console.log(`Listing ${id} is not active`);
+                        return null;
+                    }
+    
+                    const tokenURI = await simpleNFTContract.tokenURI(listing.tokenId);
+                    console.log(`Token URI for listing ${id}:`, tokenURI);
+                    
+                    const response = await fetch(tokenURI.replace('ipfs://', 'https://ipfs.io/ipfs/'));
+                    const metadata = await response.json();
+    
+                    return {
+                        id: listing.tokenId.toString(),
+                        listingId: id.toString(),
+                        image: metadata.image.replace('ipfs://', 'https://ipfs.io/ipfs/'),
+                        name: metadata.name,
+                        price: ethers.formatEther(listing.price),
+                        seller: listing.seller,
+                        isListed: listing.isListed
+                    };
+                } catch (error) {
+                    console.error(`Error processing listing ${id}:`, error);
+                    return null;
+                }
             }));
-
-            setListedNFTs(nfts.filter(nft => nft !== null));
+    
+            const filteredNFTs = nfts.filter(nft => nft !== null);
+            console.log("Filtered NFTs:", filteredNFTs);
+            setListedNFTs(filteredNFTs);
         } catch (error) {
             console.error("Error fetching NFTs:", error);
-           // setError(error.message);
+            setError(error.message);
         } finally {
             setLoading(false);
         }
-    };
+    };    
 
     const buyNFT = async (listingId, price) => {
         try {
-            const provider = new ethers.providers.Web3Provider(window.ethereum);
-            const signer = provider.getSigner();
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
             const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
 
-            const transaction = await marketplaceContract.buyNFT(listingId, {
-                value: ethers.utils.parseEther(price)
-            });
+            const tx = await marketplaceContract.buyNFT(listingId, { value: ethers.parseEther(price) });
+            await tx.wait();
 
-            await transaction.wait();
-            alert("NFT purchased successfully!");
-            fetchListedNFTs(); // Refresh the list after purchase
+            console.log("NFT purchased successfully!");
+            fetchListedNFTs();
         } catch (error) {
             console.error("Error buying NFT:", error);
-            alert("Failed to buy NFT. Please try again.");
+            setError("Failed to buy NFT. Please try again.");
         }
     };
 
     return (
         <Container>
             <NavBar />
-            <Typography variant="h4" sx={{ mt: 4, mb: 3 }}>NFT Marketplace</Typography>
+            <Typography variant="h4" sx={{ mt: 4, mb: 3 }}>Top Collection</Typography>
 
             {loading ? (
-                <Typography>Loading NFTs...</Typography>
+                <CircularProgress />
             ) : error ? (
                 <Typography color="error">Error: {error}</Typography>
             ) : listedNFTs.length > 0 ? (
