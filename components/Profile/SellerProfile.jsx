@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useContext, useCallback } from 'react';
 import { ethers } from 'ethers';
-import { Container, Grid, Card, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
+import { Container, Grid, Card, CardContent, Typography, Box, Button, CircularProgress, TextField } from '@mui/material';
 import { MarketPlace_ADDRESS, MarketPlace_ABI, SimpleNFT_ADDRESS, SimpleNFT_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
 import Image from 'next/image';
@@ -10,6 +10,8 @@ const SellerProfile = () => {
     const [userNFTs, setUserNFTs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [listingPrice, setListingPrice] = useState('');
+    const [listingDeadline, setListingDeadline] = useState('');
 
     const fetchUserNFTs = useCallback(async () => {
         if (!account) return;
@@ -22,30 +24,32 @@ const SellerProfile = () => {
             const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
             const simpleNFTContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
     
-            const sellerListingIds = await marketplaceContract.getSellerListingIds(account);
+            const sellerListingIds = await marketplaceContract.getSellerListings(account);
             console.log("Seller Listing IDs:", sellerListingIds);
     
+            const currentTimestamp = Math.floor(Date.now() / 1000);
+
             const nfts = await Promise.all(sellerListingIds.map(async (id) => {
                 const listing = await marketplaceContract.listings(id);
-                
-                // Check if the listing is active
-                if (!listing.isListed) {
+            
+                if (!listing.isListed || Number(listing.deadline) <= currentTimestamp) {
                     return null;
                 }
-
+            
                 const tokenURI = await simpleNFTContract.tokenURI(listing.tokenId);
                 const response = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
                 const metadata = await response.json();
-    
+            
                 return {
                     id: listing.tokenId.toString(),
                     listingId: id.toString(),
                     image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'),
                     name: metadata.name,
-                    price: ethers.formatEther(listing.price),
+                    price: ethers.formatEther(listing.price.toString()),
+                    deadline: new Date(Number(listing.deadline) * 1000).toLocaleString(),
                     isListed: listing.isListed
                 };
-            }));
+            }));            
     
             setUserNFTs(nfts.filter(nft => nft !== null));
         } catch (error) {
@@ -75,6 +79,61 @@ const SellerProfile = () => {
         } catch (error) {
             console.error("Error canceling listing:", error);
             setError(error.message || "An unknown error occurred while canceling the listing");
+        }
+    };
+
+    const listNFT = async (tokenId) => {
+        try {
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+            const contract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
+
+            const price = ethers.parseEther(listingPrice);
+            const deadline = Math.floor(new Date(listingDeadline).getTime() / 1000);
+            const nonce = await contract.getNonce(account);
+
+            const domain = {
+                name: "NFTMarketplace",
+                version: "1",
+                chainId: (await provider.getNetwork()).chainId,
+                verifyingContract: MarketPlace_ADDRESS
+            };
+
+            const types = {
+                Listing: [
+                    { name: "nftContract", type: "address" },
+                    { name: "tokenId", type: "uint256" },
+                    { name: "price", type: "uint256" },
+                    { name: "seller", type: "address" },
+                    { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" }
+                ]
+            };
+
+            const value = {
+                nftContract: SimpleNFT_ADDRESS,
+                tokenId: tokenId,
+                price: price,
+                seller: account,
+                nonce: nonce,
+                deadline: deadline
+            };
+
+            const signature = await signer.signTypedData(domain, types, value);
+
+            const tx = await contract.listNFTWithSignature(
+                SimpleNFT_ADDRESS,
+                tokenId,
+                price,
+                deadline,
+                signature
+            );
+            await tx.wait();
+
+            fetchUserNFTs();
+        } catch (error) {
+            console.error("Error listing NFT:", error);
+            setError(error.message || "An unknown error occurred while listing the NFT");
         }
     };
 
@@ -120,6 +179,9 @@ const SellerProfile = () => {
                                             {nft.price} ETH
                                         </Typography>
                                     </Box>
+                                    <Typography variant="body2" sx={{ mt: 1 }}>
+                                        Deadline: {nft.deadline}
+                                    </Typography>
                                     <Button
                                         variant="contained"
                                         color="secondary"
@@ -135,7 +197,7 @@ const SellerProfile = () => {
                     ))}
                 </Grid>
             ) : (
-                <Typography>You haven't listed any NFTs yet.</Typography>
+                <Typography>You don't have any active NFT listings.</Typography>
             )}
         </Container>
     );

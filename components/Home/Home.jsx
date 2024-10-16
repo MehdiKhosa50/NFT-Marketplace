@@ -27,49 +27,52 @@ const Home = () => {
             const marketplaceContract = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
             const simpleNFTContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
     
-            const listingIds = await marketplaceContract.getListingIds();
+            const listingIds = await marketplaceContract.getAllListingIds();
             console.log("Listing IDs:", listingIds);
     
+            const currentTimestamp = Math.floor(Date.now() / 1000);
+            
             const nfts = await Promise.all(listingIds.map(async (id) => {
                 try {
                     const listing = await marketplaceContract.listings(id);
                     
-                    if (!listing.isListed) {
-                        console.log(`Listing ${id} is not active`);
+                    if (!listing.isListed || Number(listing.deadline) <= currentTimestamp) {
+                        console.log(`Listing ${id} is not active or has expired`);
                         return null;
                     }
-    
+            
                     const tokenURI = await simpleNFTContract.tokenURI(listing.tokenId);
                     console.log(`Token URI for listing ${id}:`, tokenURI);
                     
                     const response = await fetch(tokenURI.replace('ipfs://', 'https://ipfs.io/ipfs/'));
                     const metadata = await response.json();
-    
+            
                     return {
                         id: listing.tokenId.toString(),
                         listingId: id.toString(),
                         image: metadata.image.replace('ipfs://', 'https://ipfs.io/ipfs/'),
                         name: metadata.name,
-                        price: ethers.formatEther(listing.price),
+                        price: ethers.formatEther(listing.price.toString()),
                         seller: listing.seller,
+                        deadline: new Date(Number(listing.deadline) * 1000).toLocaleString(),
                         isListed: listing.isListed
                     };
                 } catch (error) {
                     console.error(`Error processing listing ${id}:`, error);
                     return null;
                 }
-            }));
+            }));            
     
             const filteredNFTs = nfts.filter(nft => nft !== null);
             console.log("Filtered NFTs:", filteredNFTs);
             setListedNFTs(filteredNFTs);
         } catch (error) {
             console.error("Error fetching NFTs:", error);
-            setError(error.message);
+            setError(error.message || "An unknown error occurred");
         } finally {
             setLoading(false);
         }
-    };    
+    }; 
 
     const buyNFT = async (listingId, price) => {
         try {
@@ -128,6 +131,9 @@ const Home = () => {
                                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                                         Seller: {nft.seller.slice(0, 6)}...{nft.seller.slice(-4)}
                                     </Typography>
+                                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                        Deadline: {nft.deadline}
+                                    </Typography>
                                     <Button
                                         variant="contained"
                                         color="primary"
@@ -143,7 +149,7 @@ const Home = () => {
                     ))}
                 </Grid>
             ) : (
-                <Typography>No NFTs listed at the moment.</Typography>
+                <Typography>No active NFT listings at the moment.</Typography>
             )}
         </Container>
     );

@@ -11,79 +11,57 @@ const ListNFT = () => {
     const [userNFTs, setUserNFTs] = useState([]);
     const [selectedNFT, setSelectedNFT] = useState(null);
     const [price, setPrice] = useState('');
+    const [deadline, setDeadline] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     const initContracts = useCallback(async () => {
-        console.log("Initializing contracts...");
-        console.log("Account:", account);
-        console.log("Window ethereum:", window.ethereum ? "Available" : "Not available");
-        
         if (account && window.ethereum) {
             try {
                 const provider = new ethers.BrowserProvider(window.ethereum);
                 const signer = await provider.getSigner();
-                
-                const network = await provider.getNetwork();
-                console.log("Connected to network:", network.name);
 
-                console.log("MarketPlace_ADDRESS:", MarketPlace_ADDRESS);
-                console.log("SimpleNFT_ADDRESS:", SimpleNFT_ADDRESS);
-                
                 const marketplace = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
                 setMarketplaceContract(marketplace);
-                
+
                 const nft = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
                 setNftContract(nft);
-                
-                console.log("Contracts initialized successfully");
             } catch (error) {
                 console.error("Error initializing contracts:", error);
                 setError("Failed to initialize contracts. " + error.message);
             }
         } else {
-            console.log("Account or window.ethereum not available");
             setError("Please connect your wallet to continue.");
         }
     }, [account]);
 
     const fetchUserNFTs = useCallback(async () => {
-        console.log("Fetching user NFTs...");
-        console.log("NFT Contract:", nftContract ? "Available" : "Not available");
-        console.log("Account:", account);
-        
         if (!nftContract || !account) {
-            console.log("NFT contract or account not available");
             setError("Unable to fetch NFTs. Please ensure your wallet is connected.");
             return;
         }
         setLoading(true);
         setError(null);
         try {
-            console.log("Fetching NFTs for account:", account);
             const balance = await nftContract.balanceOf(account);
-            console.log("NFT balance:", balance.toString());
-            
+            console.log("NFT balance:", balance.toString()); // Log balance
+
             const nfts = [];
             for (let i = 0; i < balance; i++) {
-                try {
-                    const tokenId = await nftContract.tokenOfOwnerByIndex(account, i);
-                    console.log("Token ID:", tokenId.toString());
-                    const tokenURI = await nftContract.tokenURI(tokenId);
-                    console.log("Token URI:", tokenURI);
-                    const metadata = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'))
-                        .then(res => res.json());
-                    nfts.push({ 
-                        tokenId: tokenId.toString(), 
-                        ...metadata,
-                        image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')
-                    });
-                    console.log("Added NFT:", nfts[nfts.length - 1]);
-                } catch (error) {
-                    console.error("Error fetching NFT at index", i, ":", error);
-                }
+                const tokenId = await nftContract.tokenOfOwnerByIndex(account, i);
+                console.log("Token ID:", tokenId.toString()); // Log token ID
+
+                const tokenURI = await nftContract.tokenURI(tokenId);
+                console.log("Token URI:", tokenURI); // Log token URI
+
+                const metadata = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'))
+                    .then(res => res.json());
+                nfts.push({
+                    tokenId: tokenId.toString(),
+                    ...metadata,
+                    image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')
+                });
             }
-            console.log("Fetched NFTs:", nfts);
             setUserNFTs(nfts);
         } catch (error) {
             console.error("Error fetching user NFTs:", error);
@@ -93,37 +71,75 @@ const ListNFT = () => {
         }
     }, [nftContract, account]);
 
+
     useEffect(() => {
-        console.log("Running initContracts effect");
         initContracts();
     }, [initContracts]);
 
     useEffect(() => {
-        console.log("Running fetchUserNFTs effect");
-        console.log("NFT Contract:", nftContract ? "Available" : "Not available");
-        console.log("Account:", account);
         if (nftContract && account) {
             fetchUserNFTs();
         }
     }, [nftContract, account, fetchUserNFTs]);
 
+
     const listNFT = async () => {
-        if (!marketplaceContract || !nftContract || !selectedNFT || !price) return;
+        if (!marketplaceContract || !nftContract || !selectedNFT || !price || !deadline) return;
         setLoading(true);
         try {
             const approveTx = await nftContract.approve(MarketPlace_ADDRESS, selectedNFT.tokenId);
             await approveTx.wait();
 
-            const listingTx = await marketplaceContract.listNFT(
+            const priceInWei = ethers.parseEther(price);
+            const deadlineTimestamp = Math.floor(new Date(deadline).getTime() / 1000);
+
+            const nonce = await marketplaceContract.getNonce(account);
+
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            
+            const domain = {
+                name: "NFTMarketplace",
+                version: "1",
+                chainId: await provider.getNetwork().then(network => network.chainId),
+                verifyingContract: MarketPlace_ADDRESS
+            };
+
+            const types = {
+                Listing: [
+                    { name: "nftContract", type: "address" },
+                    { name: "tokenId", type: "uint256" },
+                    { name: "price", type: "uint256" },
+                    { name: "seller", type: "address" },
+                    { name: "nonce", type: "uint256" },
+                    { name: "deadline", type: "uint256" }
+                ]
+            };
+
+            const value = {
+                nftContract: SimpleNFT_ADDRESS,
+                tokenId: selectedNFT.tokenId,
+                price: priceInWei,
+                seller: account,
+                nonce: nonce,
+                deadline: deadlineTimestamp
+            };
+
+            const signer = await marketplaceContract.signer;
+            const signature = await signer.signTypedData(domain, types, value);
+
+            const listingTx = await marketplaceContract.listNFTWithSignature(
                 SimpleNFT_ADDRESS,
                 selectedNFT.tokenId,
-                ethers.parseEther(price)
+                priceInWei,
+                deadlineTimestamp,
+                signature
             );
             await listingTx.wait();
 
             console.log("NFT listed successfully!");
             setSelectedNFT(null);
             setPrice('');
+            setDeadline('');
             await fetchUserNFTs();
         } catch (error) {
             console.error("Error listing NFT:", error);
@@ -133,14 +149,9 @@ const ListNFT = () => {
         }
     };
 
-    const refreshUserNFTs = async () => {
-        await fetchUserNFTs();
-        console.log("NFTs refreshed. You may need to navigate to the home page manually.");
-    };
-
     return (
         <Box sx={{ maxWidth: 800, mx: 'auto', mt: 4, p: 3 }}>
-             <Typography variant="h4" gutterBottom>List Your NFT</Typography>
+            <Typography variant="h4" gutterBottom>List Your NFT</Typography>
             <Button onClick={fetchUserNFTs} variant="contained" color="secondary" sx={{ mb: 2 }}>
                 Refresh NFTs
             </Button>
@@ -190,13 +201,24 @@ const ListNFT = () => {
                         margin="normal"
                         type="number"
                     />
+                    <TextField
+                        label="Listing Deadline"
+                        value={deadline}
+                        onChange={(e) => setDeadline(e.target.value)}
+                        fullWidth
+                        margin="normal"
+                        type="datetime-local"
+                        InputLabelProps={{
+                            shrink: true,
+                        }}
+                    />
                     <Button
                         variant="contained"
                         color="primary"
                         onClick={listNFT}
                         fullWidth
                         sx={{ mt: 2 }}
-                        disabled={loading || !selectedNFT || !price}
+                        disabled={loading || !selectedNFT || !price || !deadline}
                     >
                         {loading ? <CircularProgress size={24} /> : 'List NFT'}
                     </Button>
