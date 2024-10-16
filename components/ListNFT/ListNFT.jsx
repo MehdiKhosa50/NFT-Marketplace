@@ -1,158 +1,102 @@
-import React, { useState, useEffect, useContext, useCallback } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { ethers } from 'ethers';
-import { Button, TextField, Typography, Box, CircularProgress, Grid, Card, CardContent, CardMedia } from '@mui/material';
-import { MarketPlace_ADDRESS, MarketPlace_ABI, SimpleNFT_ADDRESS, SimpleNFT_ABI } from '../../constant';
+import { Button, Typography, Box, CircularProgress, Grid, Card, CardContent, CardMedia, TextField } from '@mui/material';
+import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
 
 const ListNFT = () => {
     const { account } = useContext(NFTContext);
-    const [marketplaceContract, setMarketplaceContract] = useState(null);
-    const [nftContract, setNftContract] = useState(null);
-    const [userNFTs, setUserNFTs] = useState([]);
-    const [selectedNFT, setSelectedNFT] = useState(null);
-    const [price, setPrice] = useState('');
-    const [deadline, setDeadline] = useState('');
+    const [ownedNFTs, setOwnedNFTs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [listingPrices, setListingPrices] = useState({});
 
-    const initContracts = useCallback(async () => {
-        if (account && window.ethereum) {
-            try {
-                const provider = new ethers.BrowserProvider(window.ethereum);
-                const signer = await provider.getSigner();
-
-                const marketplace = new ethers.Contract(MarketPlace_ADDRESS, MarketPlace_ABI, signer);
-                setMarketplaceContract(marketplace);
-
-                const nft = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
-                setNftContract(nft);
-            } catch (error) {
-                console.error("Error initializing contracts:", error);
-                setError("Failed to initialize contracts. " + error.message);
-            }
-        } else {
-            setError("Please connect your wallet to continue.");
+    useEffect(() => {
+        if (account) {
+            fetchOwnedNFTs();
         }
     }, [account]);
 
-    const fetchUserNFTs = useCallback(async () => {
-        if (!nftContract || !account) {
-            setError("Unable to fetch NFTs. Please ensure your wallet is connected.");
-            return;
-        }
+    const fetchOwnedNFTs = async () => {
+        if (!account) return;
         setLoading(true);
         setError(null);
         try {
-            const balance = await nftContract.balanceOf(account);
-            console.log("NFT balance:", balance.toString()); // Log balance
-
-            const nfts = [];
-            for (let i = 0; i < balance; i++) {
-                const tokenId = await nftContract.tokenOfOwnerByIndex(account, i);
-                console.log("Token ID:", tokenId.toString()); // Log token ID
-
-                const tokenURI = await nftContract.tokenURI(tokenId);
-                console.log("Token URI:", tokenURI); // Log token URI
-
-                const metadata = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'))
-                    .then(res => res.json());
-                nfts.push({
-                    tokenId: tokenId.toString(),
-                    ...metadata,
-                    image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')
-                });
-            }
-            setUserNFTs(nfts);
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
+    
+            // Convert balance to a number, as balance will return a BigInt
+            const balance = await contract.balanceOf(account);
+            const balanceNum = Number(balance); // Safely convert if it's within safe range
+            
+            // Fetch NFTs owned by the account
+            const nftsData = await Promise.all(
+                Array.from({ length: balanceNum }, (_, i) => i).map(async (index) => {
+                    const tokenId = await contract.tokenOfOwnerByIndex(account, index);
+                    
+                    // Convert tokenId to a string to avoid BigInt issues
+                    const tokenIdStr = tokenId.toString();
+                    const tokenURI = await contract.tokenURI(tokenIdStr);
+                    
+                    const metadata = await fetchMetadata(tokenURI);
+                    
+                    return {
+                        id: tokenIdStr, // Use string for display and manipulation
+                        ...metadata,
+                        image: metadata.image ? metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/') : null
+                    };
+                })
+            );
+            setOwnedNFTs(nftsData);
         } catch (error) {
-            console.error("Error fetching user NFTs:", error);
-            setError("Failed to fetch NFTs. " + error.message);
+            console.error("Error fetching owned NFTs:", error);
+            setError("Failed to fetch owned NFTs. " + error.message);
         } finally {
             setLoading(false);
         }
-    }, [nftContract, account]);
+    };    
 
-
-    useEffect(() => {
-        initContracts();
-    }, [initContracts]);
-
-    useEffect(() => {
-        if (nftContract && account) {
-            fetchUserNFTs();
-        }
-    }, [nftContract, account, fetchUserNFTs]);
-
-
-    const listNFT = async () => {
-        if (!marketplaceContract || !nftContract || !selectedNFT || !price || !deadline) return;
-        setLoading(true);
+    const fetchMetadata = async (tokenURI) => {
         try {
-            const approveTx = await nftContract.approve(MarketPlace_ADDRESS, selectedNFT.tokenId);
-            await approveTx.wait();
+            const response = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
+            return await response.json();
+        } catch (error) {
+            console.error("Error fetching metadata:", error);
+            return {};
+        }
+    };
+
+    const handlePriceChange = (tokenId, price) => {
+        setListingPrices(prev => ({ ...prev, [tokenId]: price }));
+    };
+
+    const listNFT = async (tokenId) => {
+        if (!account) return;
+        const price = listingPrices[tokenId];
+        if (!price) {
+            alert("Please enter a price for the NFT.");
+            return;
+        }
+        try {
+            const provider = new ethers.BrowserProvider(window.ethereum);
+            const signer = await provider.getSigner();
+            const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
             const priceInWei = ethers.parseEther(price);
-            const deadlineTimestamp = Math.floor(new Date(deadline).getTime() / 1000);
-
-            const nonce = await marketplaceContract.getNonce(account);
-
-            const provider = new ethers.BrowserProvider(window.ethereum);
-            
-            const domain = {
-                name: "NFTMarketplace",
-                version: "1",
-                chainId: await provider.getNetwork().then(network => network.chainId),
-                verifyingContract: MarketPlace_ADDRESS
-            };
-
-            const types = {
-                Listing: [
-                    { name: "nftContract", type: "address" },
-                    { name: "tokenId", type: "uint256" },
-                    { name: "price", type: "uint256" },
-                    { name: "seller", type: "address" },
-                    { name: "nonce", type: "uint256" },
-                    { name: "deadline", type: "uint256" }
-                ]
-            };
-
-            const value = {
-                nftContract: SimpleNFT_ADDRESS,
-                tokenId: selectedNFT.tokenId,
-                price: priceInWei,
-                seller: account,
-                nonce: nonce,
-                deadline: deadlineTimestamp
-            };
-
-            const signer = await marketplaceContract.signer;
-            const signature = await signer.signTypedData(domain, types, value);
-
-            const listingTx = await marketplaceContract.listNFTWithSignature(
-                SimpleNFT_ADDRESS,
-                selectedNFT.tokenId,
-                priceInWei,
-                deadlineTimestamp,
-                signature
-            );
-            await listingTx.wait();
-
-            console.log("NFT listed successfully!");
-            setSelectedNFT(null);
-            setPrice('');
-            setDeadline('');
-            await fetchUserNFTs();
+            const tx = await contract.listNFT(tokenId, priceInWei);
+            await tx.wait();
+            alert("NFT listed successfully!");
+            fetchOwnedNFTs(); // Refresh the list
         } catch (error) {
             console.error("Error listing NFT:", error);
-            setError("Failed to list NFT. Please try again.");
-        } finally {
-            setLoading(false);
+            alert("Failed to list NFT. " + error.message);
         }
     };
 
     return (
         <Box sx={{ maxWidth: 800, mx: 'auto', mt: 4, p: 3 }}>
-            <Typography variant="h4" gutterBottom>List Your NFT</Typography>
-            <Button onClick={fetchUserNFTs} variant="contained" color="secondary" sx={{ mb: 2 }}>
+            <Typography variant="h4" gutterBottom>Your NFTs</Typography>
+            <Button onClick={fetchOwnedNFTs} variant="contained" color="secondary" sx={{ mb: 2 }}>
                 Refresh NFTs
             </Button>
 
@@ -160,14 +104,11 @@ const ListNFT = () => {
                 <CircularProgress />
             ) : error ? (
                 <Typography color="error">{error}</Typography>
-            ) : userNFTs.length > 0 ? (
+            ) : ownedNFTs.length > 0 ? (
                 <Grid container spacing={2}>
-                    {userNFTs.map((nft) => (
-                        <Grid item xs={12} sm={6} md={4} key={nft.tokenId}>
-                            <Card
-                                onClick={() => setSelectedNFT(nft)}
-                                sx={{ cursor: 'pointer', border: selectedNFT?.tokenId === nft.tokenId ? '2px solid blue' : 'none' }}
-                            >
+                    {ownedNFTs.map((nft) => (
+                        <Grid item xs={12} sm={6} md={4} key={nft.id}>
+                            <Card>
                                 <CardMedia
                                     component="img"
                                     height="140"
@@ -178,54 +119,33 @@ const ListNFT = () => {
                                     <Typography gutterBottom variant="h6" component="div">
                                         {nft.name}
                                     </Typography>
-                                    <Typography variant="body2" color="text.secondary">
-                                        Token ID: {nft.tokenId}
-                                    </Typography>
+                                    <TextField
+                                        label="Price (ETH)"
+                                        type="number"
+                                        value={listingPrices[nft.id] || ''}
+                                        onChange={(e) => handlePriceChange(nft.id, e.target.value)}
+                                        fullWidth
+                                        margin="normal"
+                                    />
+                                    <Button
+                                        variant="contained"
+                                        color="primary"
+                                        onClick={() => listNFT(nft.id)}
+                                        sx={{ mt: 1 }}
+                                        fullWidth
+                                    >
+                                        List NFT
+                                    </Button>
                                 </CardContent>
                             </Card>
                         </Grid>
                     ))}
                 </Grid>
             ) : (
-                <Typography>You don't have any NFTs to list.</Typography>
-            )}
-
-            {selectedNFT && (
-                <Box sx={{ mt: 4 }}>
-                    <Typography variant="h6" gutterBottom>List Selected NFT</Typography>
-                    <TextField
-                        label="Price (ETH)"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        fullWidth
-                        margin="normal"
-                        type="number"
-                    />
-                    <TextField
-                        label="Listing Deadline"
-                        value={deadline}
-                        onChange={(e) => setDeadline(e.target.value)}
-                        fullWidth
-                        margin="normal"
-                        type="datetime-local"
-                        InputLabelProps={{
-                            shrink: true,
-                        }}
-                    />
-                    <Button
-                        variant="contained"
-                        color="primary"
-                        onClick={listNFT}
-                        fullWidth
-                        sx={{ mt: 2 }}
-                        disabled={loading || !selectedNFT || !price || !deadline}
-                    >
-                        {loading ? <CircularProgress size={24} /> : 'List NFT'}
-                    </Button>
-                </Box>
+                <Typography>You don't own any NFTs.</Typography>
             )}
         </Box>
     );
 };
 
-export default ListNFT;
+export default ListNFT

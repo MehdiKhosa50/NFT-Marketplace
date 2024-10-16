@@ -141,3 +141,17 @@ contract NFTMarketplace is EIP712, ReentrancyGuard, IERC721Receiver {
         return allListingIds;
     }
 }
+
+
+// I Want you to write an NFT MarketPlace Contract which should be fully functional and secure.
+// The contract should support the following functionalities:
+// 1. List an NFT for sale
+// 2. Buy an NFT
+// 3. Cancel a listing
+// 4. Get listing details
+// 5. Get all listings
+// 6. Get all listings for a seller
+// It should be fully implementation of EIP712 with Lazy Minting!
+// When user mints an NFT, We have to store it's metamadata signature and every other thing which
+// is complasory for an functionality. of EIP712 and Lazy Minting. But it should be truely Lazy Minting.
+// The user who mints it he actually uploaded the data but the person who buys it will pay the fee for minting and buying i mean actual minting will be happened then. I hope you understand!

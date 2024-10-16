@@ -1,47 +1,36 @@
-import React, { useState, useContext, useRef, useEffect } from 'react';
-import { Button, TextField, Typography, Box, CircularProgress, Switch, FormControlLabel } from '@mui/material';
+import React, { useState, useContext, useEffect } from 'react';
+import { Button, TextField, Typography, Box, CircularProgress } from '@mui/material';
 import { NFTContext } from '../../context/NFTContext';
 import axios from 'axios';
 import Image from 'next/image';
 import { ethers } from 'ethers';
-import { SimpleNFT_ADDRESS, SimpleNFT_ABI } from '../../constant';
+import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 
 const MintNFT = () => {
-    const { account} = useContext(NFTContext);
+    const { account } = useContext(NFTContext);
     const [file, setFile] = useState(null);
     const [previewUrl, setPreviewUrl] = useState('');
     const [loading, setLoading] = useState(false);
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
-    const [useSignature, setUseSignature] = useState(false);
-    const [nonce, setNonce] = useState(0);
-    const tokenIdCounter = useRef(0);
+    const [price, setPrice] = useState('');
+    const [nextTokenId, setNextTokenId] = useState(0);
 
     useEffect(() => {
-        const fetchNonce = async () => {
+        const fetchNextTokenId = async () => {
             if (account) {
                 try {
                     const provider = new ethers.BrowserProvider(window.ethereum);
-                    const contract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, provider);
-                    const userNonce = await contract.getNonce(account);
-                    
-                    // Log the returned userNonce
-                    console.log("User Nonce:", userNonce);
-    
-                    // Check the type and convert accordingly
-                    if (typeof userNonce === 'object' && userNonce._isBigNumber) {
-                        setNonce(userNonce.toNumber()); // If it's a BigNumber
-                    } else {
-                        setNonce(Number(userNonce)); // If it's a number or string
-                    }
+                    const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
+                    const tokenId = await contract.getNextTokenId();
+                    setNextTokenId(Number(tokenId));
                 } catch (error) {
-                    console.error("Error fetching nonce:", error);
+                    console.error("Error fetching next token ID:", error);
                 }
             }
         };
-        fetchNonce();
+        fetchNextTokenId();
     }, [account]);
-    
 
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0];
@@ -85,55 +74,68 @@ const MintNFT = () => {
         }
     };
 
-    const mintNFT = async () => {
-        if (!file || !name || !description) return;
+    const lazyMintNFT = async () => {
+        if (!file || !name || !description || !price) return;
         setLoading(true);
         try {
             const metadataHash = await uploadToPinata();
             if (!metadataHash) throw new Error('Failed to upload to IPFS');
+    
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
-            const nftContract = new ethers.Contract(SimpleNFT_ADDRESS, SimpleNFT_ABI, signer);
-            
-            const tokenId = tokenIdCounter.current;
-            tokenIdCounter.current += 1;
-            
-            if (useSignature) {
-                const chainId = await provider.getNetwork().then(network => network.chainId);
-                const domain = {
-                    name: "MyToken",
-                    version: "1",
-                    chainId: chainId,
-                    verifyingContract: SimpleNFT_ADDRESS
-                };
-                const types = {
-                    Mint: [
-                        { name: "to", type: "address" },
-                        { name: "tokenId", type: "uint256" },
-                        { name: "uri", type: "string" },
-                        { name: "nonce", type: "uint256" }
-                    ]
-                };
-                const value = {
-                    to: account,
-                    tokenId: tokenId,
-                    uri: `ipfs://${metadataHash}`,
-                    nonce: nonce
-                };
-                
-                const signature = await signer.signTypedData(domain, types, value);
-                
-                const mintTx = await nftContract.mintWithSignature(account, tokenId, `ipfs://${metadataHash}`, signature);
-                await mintTx.wait();
-            } else {
-                const mintTx = await nftContract.safeMint(account, tokenId, `ipfs://${metadataHash}`);
-                await mintTx.wait();
-            }
-
-            console.log("NFT minted successfully!");
-            setNonce(nonce + 1);
+    
+            const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
+    
+            const tokenId = BigInt(nextTokenId);
+    
+            const priceInWei = ethers.parseEther(price);
+    
+            const chainId = await provider.getNetwork().then(network => network.chainId);
+    
+            const domain = {
+                name: "NFTMarketplace",
+                version: "1",
+                chainId: chainId,
+                verifyingContract: NFTMarketplace_ADDRESS
+            };
+    
+            const types = {
+                LazyMint: [
+                    { name: "tokenId", type: "uint256" },
+                    { name: "tokenURI", type: "string" },
+                    { name: "creator", type: "address" }
+                ]
+            };
+    
+            const creatorAddress = await signer.getAddress();
+    
+            const value = {
+                tokenId: tokenId,
+                tokenURI: `ipfs://${metadataHash}`,
+                creator: creatorAddress
+            };
+    
+            console.log("Domain:", domain);
+            console.log("Types:", types);
+            console.log("Value:", value);
+    
+            const signature = await signer.signTypedData(domain, types, value);
+    
+            console.log("Signature:", signature);
+    
+            const tx = await contract.lazyMint({
+                tokenId: tokenId,
+                tokenURI: `ipfs://${metadataHash}`,
+                creator: creatorAddress,
+                signature: signature
+            }, { value: priceInWei });
+    
+            await tx.wait();
+    
+            console.log("NFT lazy minted successfully!");
+            setNextTokenId(nextTokenId + 1);
         } catch (error) {
-            console.error("Error minting NFT:", error);
+            console.error("Error lazy minting NFT:", error);
         } finally {
             setLoading(false);
         }
@@ -141,7 +143,7 @@ const MintNFT = () => {
 
     return (
         <Box sx={{ maxWidth: 600, mx: 'auto', mt: 4, p: 3 }}>
-            <Typography variant="h4" gutterBottom>Mint Your NFT</Typography>
+            <Typography variant="h4" gutterBottom>Lazy Mint Your NFT</Typography>
 
             <TextField
                 label="NFT Name"
@@ -161,6 +163,15 @@ const MintNFT = () => {
                 margin="normal"
             />
 
+            <TextField
+                label="Price (ETH)"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+                fullWidth
+                type="number"
+                margin="normal"
+            />
+
             <input
                 accept="image/*"
                 type="file"
@@ -176,39 +187,28 @@ const MintNFT = () => {
 
             {previewUrl && (
                 <Box sx={{ mt: 2, textAlign: 'center' }}>
-                    <Image 
-                        src={previewUrl} 
-                        alt="NFT Preview" 
+                    <Image
+                        src={previewUrl}
+                        alt="NFT Preview"
                         width={500}
                         height={300}
                     />
                 </Box>
             )}
 
-            <FormControlLabel
-                control={
-                    <Switch
-                        checked={useSignature}
-                        onChange={(e) => setUseSignature(e.target.checked)}
-                        name="useSignature"
-                    />
-                }
-                label="Use Signature for Minting"
-            />
-
             <Button
                 variant="contained"
                 color="primary"
-                onClick={mintNFT}
+                onClick={lazyMintNFT}
                 fullWidth
                 sx={{ mt: 3 }}
-                disabled={loading || !file || !name || !description}
+                disabled={loading || !file || !name || !description || !price}
             >
-                {loading ? <CircularProgress size={24} /> : 'Mint NFT'}
+                {loading ? <CircularProgress size={24} /> : 'Lazy Mint NFT'}
             </Button>
 
             <Typography variant="body2" sx={{ mt: 2 }}>
-                Current Nonce: {nonce}
+                Next Token ID: {nextTokenId}
             </Typography>
         </Box>
     );
