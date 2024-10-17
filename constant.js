@@ -1,4 +1,4 @@
-export const NFTMarketplace_ADDRESS = "0x1d0dE4136392ce0Cde86350d5bd35335203Ab670";
+export const NFTMarketplace_ADDRESS = "0xE42Cc5B9eB6c296C939A0b04e86a44863A88F6bC";
 export const MyToken_ADDRESS = "0x5c39b8dC60Bf2cFa7897022B53B9099E4ABbB3eb"
 export const NFTMarketplace_ABI = [
 	{
