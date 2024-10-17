@@ -1,12 +1,12 @@
 import React, { useState, useContext, useEffect } from 'react';
-import { Button, TextField, Typography, Box, CircularProgress } from '@mui/material';
+import { Button, TextField, Typography, Box, CircularProgress, Snackbar } from '@mui/material';
 import { NFTContext } from '../../context/NFTContext';
 import axios from 'axios';
 import Image from 'next/image';
 import { ethers } from 'ethers';
 import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 
-const LazyMintNFT = () => {
+const MintNFT = () => {
     const { account } = useContext(NFTContext);
     const [file, setFile] = useState(null);
     const [previewUrl, setPreviewUrl] = useState('');
@@ -15,35 +15,30 @@ const LazyMintNFT = () => {
     const [description, setDescription] = useState('');
     const [price, setPrice] = useState('');
     const [nextTokenId, setNextTokenId] = useState(0);
+    const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
 
     useEffect(() => {
-        const storedNextTokenId = localStorage.getItem('nextTokenId');
-        if (storedNextTokenId) {
-            setNextTokenId(Number(storedNextTokenId));
-        }
-    }, []);
-
-    useEffect(() => {
-        const fetchNextTokenId = async () => {
-            if (account) {
-                try {
-                    const provider = new ethers.BrowserProvider(window.ethereum);
-                    const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
-                    const tokenId = await contract.getNextTokenId();
-                    setNextTokenId(Number(tokenId));
-                } catch (error) {
-                    console.error("Error fetching next token ID:", error);
-                }
-            }
-        };
         fetchNextTokenId();
     }, [account]);
+
+    const fetchNextTokenId = async () => {
+        if (account) {
+            try {
+                const provider = new ethers.BrowserProvider(window.ethereum);
+                const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
+                const tokenId = await contract.getNextTokenId();
+                setNextTokenId(Number(tokenId));
+            } catch (error) {
+                console.error("Error fetching next token ID:", error);
+                showSnackbar("Failed to fetch next token ID", 'error');
+            }
+        }
+    };
 
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0];
         setFile(selectedFile);
-        const url = URL.createObjectURL(selectedFile);
-        setPreviewUrl(url);
+        setPreviewUrl(URL.createObjectURL(selectedFile));
     };
 
     const uploadToPinata = async () => {
@@ -81,8 +76,12 @@ const LazyMintNFT = () => {
         }
     };
 
+
     const lazyMintNFT = async () => {
-        if (!file || !name || !description || !price) return;
+        if (!file || !name || !description || !price || !account) {
+            showSnackbar('Please fill all fields and connect your wallet', 'warning');
+            return;
+        }
         setLoading(true);
         try {
             const metadataHash = await uploadToPinata();
@@ -90,7 +89,6 @@ const LazyMintNFT = () => {
 
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
-
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
             const tokenId = ethers.getBigInt(nextTokenId);
@@ -114,46 +112,56 @@ const LazyMintNFT = () => {
                 ]
             };
 
-            const creatorAddress = await signer.getAddress();
-
             const value = {
                 tokenId: tokenId,
                 tokenURI: `ipfs://${metadataHash}`,
                 price: priceInWei,
-                creator: creatorAddress
+                creator: account
             };
 
             const signature = await signer.signTypedData(domain, types, value);
 
-            // Here, you would typically send this data to your backend or store it
-            console.log("Lazy Mint Data:", {
-                tokenId: tokenId.toString(),
+            const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs') || '[]');
+            lazyMintedNFTs.push({
+                id: tokenId.toString(),
                 tokenURI: `ipfs://${metadataHash}`,
                 price: priceInWei.toString(),
-                creator: creatorAddress,
-                signature: signature
-            });
-
-            // For demonstration, we're just logging. In a real app, you'd save this data.
-            console.log("NFT lazy minted successfully!");
-
-            const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs')) || [];
-            lazyMintedNFTs.push({
-                id: tokenId.toString(), // Convert BigInt to string
-                tokenURI: `ipfs://${metadataHash}`,
-                price: priceInWei.toString(), // Convert BigInt to string
-                creator: creatorAddress,
+                creator: account,
                 signature: signature,
+                name,
+                description,
+                image: `ipfs://${metadataHash}`,
             });
             localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
 
-            setNextTokenId(nextTokenId + 1);
-            localStorage.setItem('nextTokenId', nextTokenId + 1);
+            setNextTokenId(prevId => prevId + 1);
+            showSnackbar('NFT lazy minted successfully!', 'success');
+            resetForm();
         } catch (error) {
             console.error("Error lazy minting NFT:", error);
+            showSnackbar('Failed to lazy mint NFT', 'error');
         } finally {
             setLoading(false);
         }
+    };
+
+    const resetForm = () => {
+        setFile(null);
+        setPreviewUrl('');
+        setName('');
+        setDescription('');
+        setPrice('');
+    };
+
+    const showSnackbar = (message, severity) => {
+        setSnackbar({ open: true, message, severity });
+    };
+
+    const handleCloseSnackbar = (event, reason) => {
+        if (reason === 'clickaway') {
+            return;
+        }
+        setSnackbar({ ...snackbar, open: false });
     };
 
     return (
@@ -205,8 +213,9 @@ const LazyMintNFT = () => {
                     <Image
                         src={previewUrl}
                         alt="NFT Preview"
-                        width={500}
+                        width={300}
                         height={300}
+                        objectFit="contain"
                     />
                 </Box>
             )}
@@ -217,7 +226,7 @@ const LazyMintNFT = () => {
                 onClick={lazyMintNFT}
                 fullWidth
                 sx={{ mt: 3 }}
-                disabled={loading || !file || !name || !description || !price}
+                disabled={loading || !file || !name || !description || !price || !account}
             >
                 {loading ? <CircularProgress size={24} /> : 'Lazy Mint NFT'}
             </Button>
@@ -225,8 +234,16 @@ const LazyMintNFT = () => {
             <Typography variant="h6" sx={{ mt: 2 }}>
                 Next Token ID: {nextTokenId}
             </Typography>
+
+            <Snackbar
+                open={snackbar.open}
+                autoHideDuration={6000}
+                onClose={handleCloseSnackbar}
+                message={snackbar.message}
+                severity={snackbar.severity}
+            />
         </Box>
     );
 };
 
-export default LazyMintNFT;
+export default MintNFT;
