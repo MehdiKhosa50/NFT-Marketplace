@@ -4,6 +4,7 @@ import { Container, Grid, Card, CardContent, Typography, Box, Button, CircularPr
 import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
 import Image from 'next/image';
+import axios from 'axios';
 
 const SellerProfile = () => {
     const { account } = useContext(NFTContext);
@@ -18,30 +19,22 @@ const SellerProfile = () => {
         try {
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
-    
             const marketplaceContract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
-    
-            const listedTokenIds = await marketplaceContract.getSellerListings(account);
-            const nfts = [];
 
-            for (let i = 0; i < listedTokenIds.length; i++) {
-                const tokenId = listedTokenIds[i];
-                const uri = await marketplaceContract.tokenURI(tokenId);
-                const listing = await marketplaceContract.getListingDetails(tokenId);
+            const listings = await marketplaceContract.getSellerListings(account);
+            const nfts = await Promise.all(listings.filter(listing => listing.active).map(async (listing) => {
+                const uri = await marketplaceContract.tokenURI(listing.tokenId);
+                const response = await axios.get(uri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
+                const metadata = response.data;
 
-                if (listing.isActive) {
-                    const response = await fetch(uri.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
-                    const metadata = await response.json();
-
-                    nfts.push({
-                        id: tokenId.toString(),
-                        image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'),
-                        name: metadata.name,
-                        price: ethers.formatEther(listing.price.toString()),
-                        isActive: listing.isActive
-                    });
-                }
-            }
+                return {
+                    id: listing.tokenId.toString(),
+                    image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'),
+                    name: metadata.name,
+                    price: ethers.formatEther(listing.price),
+                    expirationTime: listing.expirationTime.toString()
+                };
+            }));
 
             setListedNFTs(nfts);
         } catch (error) {
@@ -53,7 +46,7 @@ const SellerProfile = () => {
     };
 
     useEffect(() => {
-        if (account && typeof window !== 'undefined' && window.ethereum) {
+        if (account) {
             fetchSellerListings();
         }
     }, [account]);
@@ -64,7 +57,33 @@ const SellerProfile = () => {
             const signer = await provider.getSigner();
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
-            const tx = await contract.cancelListing(tokenId);
+            const domain = {
+                name: await contract.name(),
+                version: '1',
+                chainId: (await provider.getNetwork()).chainId,
+                verifyingContract: NFTMarketplace_ADDRESS,
+            };
+
+            const types = {
+                CancelListing: [
+                    { name: 'tokenId', type: 'uint256' },
+                    { name: 'creator', type: 'address' },
+                ],
+            };
+
+            const value = {
+                tokenId: tokenId,
+                creator: account,
+            };
+
+            const signature = await signer.signTypedData(domain, types, value);
+
+            const tx = await contract.cancelListing({
+                tokenId: tokenId,
+                creator: account,
+                signature: signature,
+            });
+
             await tx.wait();
 
             fetchSellerListings();
@@ -116,6 +135,9 @@ const SellerProfile = () => {
                                             {nft.price} ETH
                                         </Typography>
                                     </Box>
+                                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                        Expires: {new Date(nft.expirationTime * 1000).toLocaleString()}
+                                    </Typography>
                                     <Button
                                         variant="contained"
                                         color="secondary"

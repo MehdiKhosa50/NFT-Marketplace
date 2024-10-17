@@ -2,7 +2,7 @@ import React, { useEffect, useState, useContext } from 'react';
 import { ethers } from 'ethers';
 import { NFTContext } from '../../context/NFTContext';
 import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
-import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
+import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button, CircularProgress, Alert } from '@mui/material';
 import axios from 'axios';
 
 const Home = () => {
@@ -18,16 +18,36 @@ const Home = () => {
     }, [account]);
 
     const fetchAllNFTs = async () => {
-        setError(null);
-        setLoading(true);
         try {
-            const lazyMintedNFTs = getLazyMintedNFTs();
+            console.log("fetchAllNFTs called");
+            if (!account) return;
+            setLoading(true);
+            setError(null);
+
             const onChainNFTs = await fetchOnChainNFTs();
-            const allNFTs = [...lazyMintedNFTs, ...onChainNFTs];
-            setNFTs(allNFTs);
+            const lazyMintedNFTs = getLazyMintedNFTs();
+
+            const allNFTs = [...onChainNFTs, ...lazyMintedNFTs];
+
+            // Filter out expired NFTs and NFTs with missing data
+            const currentTime = Math.floor(Date.now() / 1000);
+            const validNFTs = allNFTs.filter(nft =>
+                (!nft.expirationTime || nft.expirationTime > currentTime) &&
+                nft.image && nft.name && nft.price
+            );
+
+            setNFTs(validNFTs);
+
+            // Update local storage for lazy minted NFTs
+            const validLazyMintedNFTs = lazyMintedNFTs.filter(nft =>
+                (!nft.expirationTime || nft.expirationTime > currentTime) &&
+                nft.image && nft.name && nft.price
+            );
+            localStorage.setItem('lazyMintedNFTs', JSON.stringify(validLazyMintedNFTs));
+
         } catch (error) {
             console.error("Error fetching NFTs:", error);
-            setError(error.message || "An unknown error occurred");
+            setError("Failed to fetch NFTs. " + error.message);
         } finally {
             setLoading(false);
         }
@@ -35,17 +55,17 @@ const Home = () => {
 
     const getLazyMintedNFTs = () => {
         const storedNFTs = localStorage.getItem('lazyMintedNFTs');
-        return storedNFTs ? JSON.parse(storedNFTs).map(nft => ({...nft, isLazyMinted: true})) : [];
+        return storedNFTs ? JSON.parse(storedNFTs).map(nft => ({ ...nft, isLazyMinted: true })) : [];
     };
 
     const fetchOnChainNFTs = async () => {
         const provider = new ethers.BrowserProvider(window.ethereum);
         const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
 
-        const nextTokenId = await contract.getNextTokenId();
+        const totalSupply = await contract.getNextTokenId();
         const nftPromises = [];
 
-        for (let i = 0; i < nextTokenId; i++) {
+        for (let i = 1; i < totalSupply; i++) {
             nftPromises.push(fetchNFTData(i, contract));
         }
 
@@ -58,17 +78,27 @@ const Home = () => {
             const owner = await contract.ownerOf(tokenId);
             if (owner === ethers.ZeroAddress) return null;
 
+            const isCanceled = await contract.canceledListings(tokenId);
+            if (isCanceled) return null;
+
             const tokenURI = await contract.tokenURI(tokenId);
             const metadata = await fetchIPFSMetadata(tokenURI);
+
+            // Return null if essential data is missing
+            if (!metadata.image || !metadata.name || !metadata.price) {
+                console.log(`Incomplete metadata for token ${tokenId}, skipping.`);
+                return null;
+            }
 
             return {
                 id: tokenId.toString(),
                 tokenURI,
                 price: metadata.price || '0',
                 creator: metadata.creator || owner,
-                name: metadata.name || `NFT #${tokenId}`,
+                name: metadata.name,
                 description: metadata.description || '',
-                image: metadata.image || '',
+                image: metadata.image,
+                expirationTime: metadata.expirationTime || null,
                 isLazyMinted: false
             };
         } catch (error) {
@@ -98,29 +128,81 @@ const Home = () => {
             const signer = await provider.getSigner();
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
-            const price = ethers.parseEther(ethers.formatEther(nft.price));
+            const price = BigInt(nft.price);
 
+            console.log("NFT details:", nft);
+            console.log("Price in wei:", price.toString());
+
+            // Reconstruct the voucher
             const voucher = {
                 tokenId: nft.id,
                 tokenURI: nft.tokenURI,
                 price: price,
                 creator: nft.creator,
+                expirationTime: BigInt(nft.expirationTime)
+            };
+
+            console.log("Reconstructed voucher:", voucher);
+
+            // Recreate the message that was signed
+            const domain = {
+                name: 'NFTMarketplace',
+                version: '1',
+                chainId: await provider.getNetwork().then(network => network.chainId),
+                verifyingContract: NFTMarketplace_ADDRESS
+            };
+
+            const types = {
+                LazyMint: [
+                    { name: 'tokenId', type: 'uint256' },
+                    { name: 'tokenURI', type: 'string' },
+                    { name: 'price', type: 'uint256' },
+                    { name: 'creator', type: 'address' },
+                    { name: 'expirationTime', type: 'uint256' }
+                ]
+            };
+
+            // Verify the signature
+            const recoveredAddress = ethers.verifyTypedData(domain, types, voucher, nft.signature);
+            console.log("Recovered address:", recoveredAddress);
+            console.log("Creator address:", nft.creator);
+
+            if (recoveredAddress.toLowerCase() !== nft.creator.toLowerCase()) {
+                throw new Error("Signature verification failed");
+            }
+
+            // Add the signature to the voucher
+            const voucherWithSignature = {
+                ...voucher,
                 signature: nft.signature
             };
 
-            const tx = await contract.lazyMintNFT(voucher, { value: price });
+            console.log("Voucher with signature:", voucherWithSignature);
+
+            // Estimate gas
+            const gasEstimate = await contract.lazyMintNFT.estimateGas(voucherWithSignature, { value: price });
+            console.log("Estimated gas:", gasEstimate.toString());
+
+            // Add a 20% buffer to the gas estimate
+            const gasLimit = gasEstimate * BigInt(120) / BigInt(100);
+
+            const tx = await contract.lazyMintNFT(voucherWithSignature, {
+                value: price,
+                gasLimit: gasLimit
+            });
+
+            console.log("Transaction sent:", tx.hash);
             await tx.wait();
 
             console.log("NFT purchased successfully!");
-
-            // Remove the purchased NFT from local storage
-            const lazyMintedNFTs = getLazyMintedNFTs().filter(item => item.id !== nft.id);
-            localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
-
-            fetchAllNFTs();
+            await fetchAllNFTs(); // Refresh the NFT list
         } catch (error) {
             console.error("Error buying NFT:", error);
-            setError("Failed to buy NFT. Please try again.");
+            if (error.reason) {
+                console.error("Error reason:", error.reason);
+            }
+            // Show an error message to the user
+            setError("Failed to buy NFT: " + (error.reason || error.message));
         }
     };
 
@@ -128,19 +210,21 @@ const Home = () => {
         <Container>
             <Typography variant="h4" sx={{ mt: 4, mb: 3 }}>NFT Marketplace</Typography>
 
+            {error && (
+                <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>
+            )}
+
             {loading ? (
                 <CircularProgress />
-            ) : error ? (
-                <Typography color="error">Error: {error}</Typography>
             ) : nfts.length > 0 ? (
                 <Grid container spacing={3}>
-                    {nfts.map((nft) => (
-                        <Grid item xs={12} sm={6} md={4} key={nft.id}>
+                    {nfts.map((nft, index) => (
+                        <Grid item xs={12} sm={6} md={4} key={`${nft.id}-${nft.isLazyMinted ? 'lazy' : 'onchain'}-${index}`}>
                             <Card>
                                 <CardMedia
                                     component="img"
                                     height="250"
-                                    image={nft.image ? nft.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/') : ''}
+                                    image={nft.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/')}
                                     alt={nft.name}
                                     sx={{ objectFit: 'cover' }}
                                 />
@@ -169,6 +253,11 @@ const Home = () => {
                                     <Typography variant="body2" color={nft.isLazyMinted ? "success.main" : "info.main"} sx={{ mt: 1 }}>
                                         {nft.isLazyMinted ? "Lazy Minted" : "On-Chain"}
                                     </Typography>
+                                    {nft.expirationTime && (
+                                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                            Expires: {new Date(nft.expirationTime * 1000).toLocaleString()}
+                                        </Typography>
+                                    )}
                                     <Button
                                         variant="contained"
                                         color="primary"
@@ -189,7 +278,7 @@ const Home = () => {
                     ))}
                 </Grid>
             ) : (
-                <Typography>No NFTs available at the moment.</Typography>
+                <Typography>No valid NFTs available at the moment.</Typography>
             )}
         </Container>
     );

@@ -1,4 +1,4 @@
-export const NFTMarketplace_ADDRESS = "0xE42Cc5B9eB6c296C939A0b04e86a44863A88F6bC";
+export const NFTMarketplace_ADDRESS = "0xB531483D16491eEA69B5fD86A36e05Ea29a676ea";
 export const MyToken_ADDRESS = "0x5c39b8dC60Bf2cFa7897022B53B9099E4ABbB3eb"
 export const NFTMarketplace_ABI = [
 	{
@@ -15,6 +15,36 @@ export const NFTMarketplace_ABI = [
 			}
 		],
 		"name": "approve",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"components": [
+					{
+						"internalType": "uint256",
+						"name": "tokenId",
+						"type": "uint256"
+					},
+					{
+						"internalType": "address",
+						"name": "creator",
+						"type": "address"
+					},
+					{
+						"internalType": "bytes",
+						"name": "signature",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct NFTMarketplace.CancelListingVoucher",
+				"name": "voucher",
+				"type": "tuple"
+			}
+		],
+		"name": "cancelListing",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -195,6 +225,11 @@ export const NFTMarketplace_ABI = [
 						"type": "address"
 					},
 					{
+						"internalType": "uint256",
+						"name": "expirationTime",
+						"type": "uint256"
+					},
+					{
 						"internalType": "bytes",
 						"name": "signature",
 						"type": "bytes"
@@ -231,54 +266,6 @@ export const NFTMarketplace_ABI = [
 		],
 		"name": "OwnableUnauthorizedAccount",
 		"type": "error"
-	},
-	{
-		"inputs": [],
-		"name": "renounceOwnership",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "from",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "to",
-				"type": "address"
-			},
-			{
-				"internalType": "uint256",
-				"name": "tokenId",
-				"type": "uint256"
-			}
-		],
-		"name": "safeTransferFrom",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "operator",
-				"type": "address"
-			},
-			{
-				"internalType": "bool",
-				"name": "approved",
-				"type": "bool"
-			}
-		],
-		"name": "setApprovalForAll",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"inputs": [
@@ -361,6 +348,25 @@ export const NFTMarketplace_ABI = [
 				"internalType": "address",
 				"name": "creator",
 				"type": "address"
+			}
+		],
+		"name": "ListingCanceled",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "uint256",
+				"name": "tokenId",
+				"type": "uint256"
+			},
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "creator",
+				"type": "address"
 			},
 			{
 				"indexed": false,
@@ -372,6 +378,12 @@ export const NFTMarketplace_ABI = [
 				"indexed": false,
 				"internalType": "uint256",
 				"name": "price",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "expirationTime",
 				"type": "uint256"
 			}
 		],
@@ -429,6 +441,36 @@ export const NFTMarketplace_ABI = [
 		"type": "event"
 	},
 	{
+		"inputs": [],
+		"name": "renounceOwnership",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "from",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "to",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "tokenId",
+				"type": "uint256"
+			}
+		],
+		"name": "safeTransferFrom",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"inputs": [
 			{
 				"internalType": "address",
@@ -452,6 +494,24 @@ export const NFTMarketplace_ABI = [
 			}
 		],
 		"name": "safeTransferFrom",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "operator",
+				"type": "address"
+			},
+			{
+				"internalType": "bool",
+				"name": "approved",
+				"type": "bool"
+			}
+		],
+		"name": "setApprovalForAll",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -531,6 +591,25 @@ export const NFTMarketplace_ABI = [
 				"internalType": "uint256",
 				"name": "",
 				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "canceledListings",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
 			}
 		],
 		"stateMutability": "view",
@@ -627,6 +706,25 @@ export const NFTMarketplace_ABI = [
 	{
 		"inputs": [
 			{
+				"internalType": "address",
+				"name": "seller",
+				"type": "address"
+			}
+		],
+		"name": "getSellerListings",
+		"outputs": [
+			{
+				"internalType": "uint256[]",
+				"name": "",
+				"type": "uint256[]"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
 				"components": [
 					{
 						"internalType": "uint256",
@@ -647,6 +745,11 @@ export const NFTMarketplace_ABI = [
 						"internalType": "address",
 						"name": "creator",
 						"type": "address"
+					},
+					{
+						"internalType": "uint256",
+						"name": "expirationTime",
+						"type": "uint256"
 					},
 					{
 						"internalType": "bytes",
@@ -734,6 +837,30 @@ export const NFTMarketplace_ABI = [
 				"internalType": "address",
 				"name": "",
 				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "sellerListings",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
 			}
 		],
 		"stateMutability": "view",

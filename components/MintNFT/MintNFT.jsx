@@ -1,4 +1,7 @@
-import React, { useState, useContext, useEffect } from 'react';
+
+
+
+import React, { useState, useContext } from 'react';
 import { Button, TextField, Typography, Box, CircularProgress, Snackbar } from '@mui/material';
 import { NFTContext } from '../../context/NFTContext';
 import axios from 'axios';
@@ -14,30 +17,13 @@ const MintNFT = () => {
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [price, setPrice] = useState('');
-    const [nextTokenId, setNextTokenId] = useState(0);
+    const [expirationDate, setExpirationDate] = useState('');
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
-
-    useEffect(() => {
-        fetchNextTokenId();
-    }, [account]);
-
-    const fetchNextTokenId = async () => {
-        if (account) {
-            try {
-                const provider = new ethers.BrowserProvider(window.ethereum);
-                const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
-                const tokenId = await contract.getNextTokenId();
-                setNextTokenId(Number(tokenId));
-            } catch (error) {
-                console.error("Error fetching next token ID:", error);
-                showSnackbar("Failed to fetch next token ID", 'error');
-            }
-        }
-    };
 
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0];
         setFile(selectedFile);
+        console.log("Selected file: ", selectedFile);
         setPreviewUrl(URL.createObjectURL(selectedFile));
     };
 
@@ -50,12 +36,13 @@ const MintNFT = () => {
             const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
-                    'pinata_api_key': 'b6716659c926343c681a',
-                    'pinata_secret_api_key': '43e1f90d6ffa1c4b4f1a43a9fadfb1bd1f74da38af9cb1d9d47843ab242958bc'
+                    'pinata_api_key': '4617d86f48917c7684bb',
+                    'pinata_secret_api_key': '36ba99ab9e33c6e030c8c3ff6146f01aa7cb8b55031650855f81d403770eb4b0'
                 }
             });
 
             const imgHash = response.data.IpfsHash;
+            console.log('Image hash:', imgHash);
 
             const metadataResponse = await axios.post('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
                 name,
@@ -64,8 +51,8 @@ const MintNFT = () => {
             }, {
                 headers: {
                     'Content-Type': 'application/json',
-                    'pinata_api_key': 'b6716659c926343c681a',
-                    'pinata_secret_api_key': '43e1f90d6ffa1c4b4f1a43a9fadfb1bd1f74da38af9cb1d9d47843ab242958bc'
+                    'pinata_api_key': '4617d86f48917c7684bb',
+                    'pinata_secret_api_key': '36ba99ab9e33c6e030c8c3ff6146f01aa7cb8b55031650855f81d403770eb4b0'
                 },
             });
 
@@ -76,9 +63,8 @@ const MintNFT = () => {
         }
     };
 
-
     const lazyMintNFT = async () => {
-        if (!file || !name || !description || !price || !account) {
+        if (!file || !name || !description || !price || !account || !expirationDate) {
             showSnackbar('Please fill all fields and connect your wallet', 'warning');
             return;
         }
@@ -91,8 +77,9 @@ const MintNFT = () => {
             const signer = await provider.getSigner();
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
-            const tokenId = ethers.getBigInt(nextTokenId);
+            const tokenId = await contract.getNextTokenId();
             const priceInWei = ethers.parseEther(price);
+            const expirationTime = Math.floor(new Date(expirationDate).getTime() / 1000);
 
             const chainId = await provider.getNetwork().then(network => network.chainId);
 
@@ -108,7 +95,8 @@ const MintNFT = () => {
                     { name: "tokenId", type: "uint256" },
                     { name: "tokenURI", type: "string" },
                     { name: "price", type: "uint256" },
-                    { name: "creator", type: "address" }
+                    { name: "creator", type: "address" },
+                    { name: "expirationTime", type: "uint256" }
                 ]
             };
 
@@ -116,10 +104,17 @@ const MintNFT = () => {
                 tokenId: tokenId,
                 tokenURI: `ipfs://${metadataHash}`,
                 price: priceInWei,
-                creator: account
+                creator: account,
+                expirationTime: expirationTime
             };
 
             const signature = await signer.signTypedData(domain, types, value);
+
+            console.log("Token ID: ", tokenId);
+            console.log("Domain: ", domain);
+            console.log("Types: ", types);
+            console.log("Value: ", value);
+            console.log("Signature: ", signature);
 
             const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs') || '[]');
             lazyMintedNFTs.push({
@@ -131,10 +126,10 @@ const MintNFT = () => {
                 name,
                 description,
                 image: `ipfs://${metadataHash}`,
+                expirationTime: expirationTime
             });
             localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
 
-            setNextTokenId(prevId => prevId + 1);
             showSnackbar('NFT lazy minted successfully!', 'success');
             resetForm();
         } catch (error) {
@@ -151,6 +146,7 @@ const MintNFT = () => {
         setName('');
         setDescription('');
         setPrice('');
+        setExpirationDate('');
     };
 
     const showSnackbar = (message, severity) => {
@@ -195,6 +191,18 @@ const MintNFT = () => {
                 margin="normal"
             />
 
+            <TextField
+                label="Expiration Date"
+                type="datetime-local"
+                value={expirationDate}
+                onChange={(e) => setExpirationDate(e.target.value)}
+                fullWidth
+                margin="normal"
+                InputLabelProps={{
+                    shrink: true,
+                }}
+            />
+
             <input
                 accept="image/*"
                 type="file"
@@ -226,14 +234,10 @@ const MintNFT = () => {
                 onClick={lazyMintNFT}
                 fullWidth
                 sx={{ mt: 3 }}
-                disabled={loading || !file || !name || !description || !price || !account}
+                disabled={loading || !file || !name || !description || !price || !account || !expirationDate}
             >
                 {loading ? <CircularProgress size={24} /> : 'Lazy Mint NFT'}
             </Button>
-
-            <Typography variant="h6" sx={{ mt: 2 }}>
-                Next Token ID: {nextTokenId}
-            </Typography>
 
             <Snackbar
                 open={snackbar.open}
