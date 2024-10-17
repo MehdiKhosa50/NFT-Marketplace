@@ -85,8 +85,15 @@ const MintNFT = () => {
             const signer = await provider.getSigner();
     
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
-    
-            const tokenId = BigInt(nextTokenId);
+
+            contract.on("SignatureDebug", (digest, signer, creator) => {
+                console.log("SignatureDebug event:");
+                console.log("Digest:", digest);
+                console.log("Signer:", signer);
+                console.log("Creator:", creator);
+            });
+
+            const tokenId = ethers.getBigInt(nextTokenId);
     
             const priceInWei = ethers.parseEther(price);
     
@@ -110,7 +117,7 @@ const MintNFT = () => {
             const creatorAddress = await signer.getAddress();
     
             const value = {
-                tokenId: tokenId,
+                tokenId: tokenId.toString(),
                 tokenURI: `ipfs://${metadataHash}`,
                 creator: creatorAddress
             };
@@ -119,7 +126,9 @@ const MintNFT = () => {
             console.log("Types:", types);
             console.log("Value:", value);
     
-            const signature = await signer.signTypedData(domain, types, value);
+            let signature = await signer.signTypedData(domain, types, value);
+    
+            signature = signature.startsWith('0x') ? signature : '0x' + signature;
     
             console.log("Signature:", signature);
     
@@ -128,7 +137,9 @@ const MintNFT = () => {
                 tokenURI: `ipfs://${metadataHash}`,
                 creator: creatorAddress,
                 signature: signature
-            }, { value: priceInWei });
+            }, { 
+                value: priceInWei,
+            });
     
             await tx.wait();
     
