@@ -1,7 +1,6 @@
+import React from 'react';
 import ListNFT from '../components/ListNFT/ListNFT';
 
-const ListNFTPage = () => {
-    return <ListNFT />;
-};
-
-export default ListNFTPage;
+export default function ListNFTPage() {
+  return <ListNFT />;
+}
