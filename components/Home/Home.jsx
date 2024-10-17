@@ -1,9 +1,8 @@
 import React, { useEffect, useState, useContext } from 'react';
 import { ethers } from 'ethers';
-import NavBar from '../NavBar/NavBar';
-import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
-import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
+import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
+import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
 import axios from 'axios';
 
 const Home = () => {
@@ -13,7 +12,7 @@ const Home = () => {
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        if (typeof window.ethereum !== 'undefined' && account) {
+        if (account) {
             fetchAllNFTs();
         }
     }, [account]);
@@ -22,13 +21,9 @@ const Home = () => {
         setError(null);
         setLoading(true);
         try {
-            console.log('Fetching lazy minted NFTs...');
             const lazyMintedNFTs = getLazyMintedNFTs();
-            console.log('Lazy minted NFTs:', lazyMintedNFTs);
             const onChainNFTs = await fetchOnChainNFTs();
-            console.log('On-chain NFTs:', onChainNFTs);
             const allNFTs = [...lazyMintedNFTs, ...onChainNFTs];
-            console.log('All NFTs:', allNFTs);
             setNFTs(allNFTs);
         } catch (error) {
             console.error("Error fetching NFTs:", error);
@@ -40,7 +35,7 @@ const Home = () => {
 
     const getLazyMintedNFTs = () => {
         const storedNFTs = localStorage.getItem('lazyMintedNFTs');
-        return storedNFTs ? JSON.parse(storedNFTs) : [];
+        return storedNFTs ? JSON.parse(storedNFTs).map(nft => ({...nft, isLazyMinted: true})) : [];
     };
 
     const fetchOnChainNFTs = async () => {
@@ -64,10 +59,6 @@ const Home = () => {
             if (owner === ethers.ZeroAddress) return null;
 
             const tokenURI = await contract.tokenURI(tokenId);
-            if (!tokenURI) {
-                console.error(`No tokenURI found for token ${tokenId}`);
-                return null;
-            }
             const metadata = await fetchIPFSMetadata(tokenURI);
 
             return {
@@ -135,7 +126,6 @@ const Home = () => {
 
     return (
         <Container>
-            <NavBar />
             <Typography variant="h4" sx={{ mt: 4, mb: 3 }}>NFT Marketplace</Typography>
 
             {loading ? (
@@ -188,7 +178,7 @@ const Home = () => {
                                         disabled={nft.creator.toLowerCase() === account.toLowerCase() || !nft.isLazyMinted}
                                     >
                                         {nft.creator.toLowerCase() === account.toLowerCase()
-                                            ? 'You created this NFT'
+                                            ? 'Your NFT'
                                             : nft.isLazyMinted
                                                 ? 'Buy NFT'
                                                 : 'Already Purchased'}
