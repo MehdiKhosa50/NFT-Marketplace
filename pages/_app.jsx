@@ -4,6 +4,7 @@ import CssBaseline from '@mui/material/CssBaseline';
 import '../styles/globals.css';
 
 import { NFTContextProvider } from '../context/NFTContext';
+import Layout from '../components/Layout'; // Import the new Layout component
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
@@ -37,7 +38,9 @@ function MyApp({ Component, pageProps }) {
           <NFTContextProvider>
             <ThemeProvider theme={theme}>
               <CssBaseline />
-              <Component {...pageProps} />
+              <Layout>
+                <Component {...pageProps} />
+              </Layout>
             </ThemeProvider>
           </NFTContextProvider>
         </RainbowKitProvider>
