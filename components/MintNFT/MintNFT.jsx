@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { ethers } from 'ethers';
 import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 
-const MintNFT = () => {
+const LazyMintNFT = () => {
     const { account } = useContext(NFTContext);
     const [file, setFile] = useState(null);
     const [previewUrl, setPreviewUrl] = useState('');
@@ -15,6 +15,13 @@ const MintNFT = () => {
     const [description, setDescription] = useState('');
     const [price, setPrice] = useState('');
     const [nextTokenId, setNextTokenId] = useState(0);
+
+    useEffect(() => {
+        const storedNextTokenId = localStorage.getItem('nextTokenId');
+        if (storedNextTokenId) {
+            setNextTokenId(Number(storedNextTokenId));
+        }
+    }, []);
 
     useEffect(() => {
         const fetchNextTokenId = async () => {
@@ -80,71 +87,68 @@ const MintNFT = () => {
         try {
             const metadataHash = await uploadToPinata();
             if (!metadataHash) throw new Error('Failed to upload to IPFS');
-    
+
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
-    
+
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
-            contract.on("SignatureDebug", (digest, signer, creator) => {
-                console.log("SignatureDebug event:");
-                console.log("Digest:", digest);
-                console.log("Signer:", signer);
-                console.log("Creator:", creator);
-            });
-
             const tokenId = ethers.getBigInt(nextTokenId);
-    
             const priceInWei = ethers.parseEther(price);
-    
+
             const chainId = await provider.getNetwork().then(network => network.chainId);
-    
+
             const domain = {
                 name: "NFTMarketplace",
                 version: "1",
                 chainId: chainId,
                 verifyingContract: NFTMarketplace_ADDRESS
             };
-    
+
             const types = {
                 LazyMint: [
                     { name: "tokenId", type: "uint256" },
                     { name: "tokenURI", type: "string" },
+                    { name: "price", type: "uint256" },
                     { name: "creator", type: "address" }
                 ]
             };
-    
+
             const creatorAddress = await signer.getAddress();
-    
+
             const value = {
-                tokenId: tokenId.toString(),
-                tokenURI: `ipfs://${metadataHash}`,
-                creator: creatorAddress
-            };
-    
-            console.log("Domain:", domain);
-            console.log("Types:", types);
-            console.log("Value:", value);
-    
-            let signature = await signer.signTypedData(domain, types, value);
-    
-            signature = signature.startsWith('0x') ? signature : '0x' + signature;
-    
-            console.log("Signature:", signature);
-    
-            const tx = await contract.lazyMint({
                 tokenId: tokenId,
                 tokenURI: `ipfs://${metadataHash}`,
+                price: priceInWei,
+                creator: creatorAddress
+            };
+
+            const signature = await signer.signTypedData(domain, types, value);
+
+            // Here, you would typically send this data to your backend or store it
+            console.log("Lazy Mint Data:", {
+                tokenId: tokenId.toString(),
+                tokenURI: `ipfs://${metadataHash}`,
+                price: priceInWei.toString(),
                 creator: creatorAddress,
                 signature: signature
-            }, { 
-                value: priceInWei,
             });
-    
-            await tx.wait();
-    
+
+            // For demonstration, we're just logging. In a real app, you'd save this data.
             console.log("NFT lazy minted successfully!");
+
+            const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs')) || [];
+            lazyMintedNFTs.push({
+                id: tokenId.toString(), // Convert BigInt to string
+                tokenURI: `ipfs://${metadataHash}`,
+                price: priceInWei.toString(), // Convert BigInt to string
+                creator: creatorAddress,
+                signature: signature,
+            });
+            localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
+
             setNextTokenId(nextTokenId + 1);
+            localStorage.setItem('nextTokenId', nextTokenId + 1);
         } catch (error) {
             console.error("Error lazy minting NFT:", error);
         } finally {
@@ -218,11 +222,11 @@ const MintNFT = () => {
                 {loading ? <CircularProgress size={24} /> : 'Lazy Mint NFT'}
             </Button>
 
-            <Typography variant="body2" sx={{ mt: 2 }}>
+            <Typography variant="h6" sx={{ mt: 2 }}>
                 Next Token ID: {nextTokenId}
             </Typography>
         </Box>
     );
 };
 
-export default MintNFT;
+export default LazyMintNFT;
