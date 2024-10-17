@@ -1,157 +1,240 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
-import "./Interfaces/IERC721.sol";
-import "./Interfaces/IERC721Receiver.sol";
-import "./Interfaces/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract NFTMarketplace is EIP712, ReentrancyGuard, IERC721Receiver {
-    using Counters for Counters.Counter;
+contract NFTMarketplace is ERC721, EIP712, ReentrancyGuard, Ownable {
     using ECDSA for bytes32;
 
-    bytes32 private constant LISTING_TYPEHASH = keccak256(
-        "Listing(address nftContract,uint256 tokenId,uint256 price,address seller,uint256 nonce,uint256 deadline)"
-    );
+    bytes32 private constant MINTING_TYPEHASH =
+        keccak256("LazyMint(uint256 tokenId,string tokenURI,address creator)");
 
     struct Listing {
-        uint256 listingId;
-        address nftContract;
         uint256 tokenId;
         address seller;
         uint256 price;
-        uint256 deadline;
-        bool isListed;
+        bool active;
     }
 
-    Counters.Counter private _listingIds;
-    mapping(uint256 => Listing) public listings;
-    mapping(address => mapping(uint256 => uint256)) public tokenIdToListingId;
-    mapping(address => uint256[]) public sellerListings;
-    mapping(address => uint256) private _nonces;
-    uint256[] public allListingIds;
-
-    event NFTListed(uint256 indexed listingId, address indexed nftContract, uint256 indexed tokenId, address seller, uint256 price, uint256 deadline);
-    event NFTSold(uint256 indexed listingId, address indexed nftContract, uint256 indexed tokenId, address seller, address buyer, uint256 price);
-    event ListingCanceled(uint256 indexed listingId, address indexed nftContract, uint256 indexed tokenId, address seller);
-
-    constructor() EIP712("NFTMarketplace", "1") {}
-
-    function onERC721Received(
-        address,
-        address,
-        uint256,
-        bytes memory
-    ) public virtual override returns (bytes4) {
-        return this.onERC721Received.selector;
+    struct LazyMintVoucher {
+        uint256 tokenId;
+        string tokenURI;
+        address creator;
+        bytes signature;
     }
 
-    function listNFTWithSignature(
-        address _nftContract, 
-        uint256 _tokenId, 
-        uint256 _price,
-        uint256 _deadline,
-        bytes memory _signature
-    ) external nonReentrant {
-        require(_price > 0, "Price must be greater than 0");
-        require(_deadline > block.timestamp, "Deadline must be in the future");
+    mapping(uint256 => Listing) private _listings;
+    mapping(uint256 => LazyMintVoucher) private _lazyMintVouchers;
+    mapping(address => uint256[]) private _sellerListings;
+    mapping(uint256 => string) private _tokenURIs;
 
-        bytes32 structHash = keccak256(abi.encode(
-            LISTING_TYPEHASH,
-            _nftContract,
-            _tokenId,
-            _price,
-            msg.sender,
-            _nonces[msg.sender],
-            _deadline
-        ));
+    uint256 private _nextTokenId;
 
-        bytes32 hash = _hashTypedDataV4(structHash);
-        address signer = hash.recover(_signature);
-        require(signer == msg.sender, "Invalid signature");
+    event NFTListed(
+        uint256 indexed tokenId,
+        address indexed seller,
+        uint256 price
+    );
+    event NFTSold(
+        uint256 indexed tokenId,
+        address indexed seller,
+        address indexed buyer,
+        uint256 price
+    );
+    event ListingCancelled(uint256 indexed tokenId, address indexed seller);
 
-        IERC721 nftContract = IERC721(_nftContract);
-        require(nftContract.ownerOf(_tokenId) == msg.sender, "Not the owner");
+    constructor(
+        string memory name,
+        string memory symbol
+    ) ERC721(name, symbol) EIP712(name, "1") Ownable(msg.sender) {}
 
-        nftContract.safeTransferFrom(msg.sender, address(this), _tokenId);
+    function isApprovedOrOwner(
+        address spender,
+        uint256 tokenId
+    ) public view returns (bool) {
+        address owner = ownerOf(tokenId);
+        return (spender == owner ||
+            isApprovedForAll(owner, spender) ||
+            getApproved(tokenId) == spender);
+    }
 
-        _listingIds.increment();
-        uint256 listingId = _listingIds.current();
+    function listNFT(uint256 tokenId, uint256 price) external {
+        require(
+            isApprovedOrOwner(_msgSender(), tokenId),
+            "Not approved or owner"
+        );
+        require(price > 0, "Price must be greater than zero");
 
-        listings[listingId] = Listing(
-            listingId,
-            _nftContract,
-            _tokenId,
-            msg.sender,
-            _price,
-            _deadline,
-            true
+        _listings[tokenId] = Listing(tokenId, _msgSender(), price, true);
+        _sellerListings[_msgSender()].push(tokenId);
+
+        emit NFTListed(tokenId, _msgSender(), price);
+    }
+
+    function buyNFT(uint256 tokenId) external payable nonReentrant {
+        Listing storage listing = _listings[tokenId];
+        require(listing.active, "Listing is not active");
+        require(msg.value >= listing.price, "Insufficient payment");
+
+        address seller = listing.seller;
+        uint256 price = listing.price;
+
+        listing.active = false;
+
+        _safeTransfer(seller, _msgSender(), tokenId, "");
+
+        payable(seller).transfer(price);
+
+        if (msg.value > price) {
+            payable(_msgSender()).transfer(msg.value - price);
+        }
+
+        emit NFTSold(tokenId, seller, _msgSender(), price);
+    }
+
+    function cancelListing(uint256 tokenId) external {
+        require(_listings[tokenId].seller == _msgSender(), "Not the seller");
+        require(_listings[tokenId].active, "Listing is not active");
+
+        delete _listings[tokenId];
+
+        emit ListingCancelled(tokenId, _msgSender());
+    }
+
+    function getListing(
+        uint256 tokenId
+    ) external view returns (Listing memory) {
+        return _listings[tokenId];
+    }
+
+    function getNextTokenId() external view returns (uint256) {
+        return _nextTokenId;
+    }
+
+    function getSellerListings(
+        address seller
+    ) external view returns (uint256[] memory) {
+        return _sellerListings[seller];
+    }
+
+    function lazyMint(
+        LazyMintVoucher calldata voucher
+    ) external payable nonReentrant {
+        require(msg.value > 0, "Payment required for minting");
+
+        emit Debug(
+            "LazyMint called",
+            voucher.tokenId,
+            voucher.tokenURI,
+            voucher.creator,
+            bytes32(voucher.signature)
         );
 
-        tokenIdToListingId[_nftContract][_tokenId] = listingId;
-        sellerListings[msg.sender].push(listingId);
-        allListingIds.push(listingId);
+        require(_verify(voucher), "Invalid signature");
 
-        _nonces[msg.sender]++;
+        _safeMint(voucher.creator, voucher.tokenId);
+        _setTokenURI(voucher.tokenId, voucher.tokenURI);
 
-        emit NFTListed(listingId, _nftContract, _tokenId, msg.sender, _price, _deadline);
+        _lazyMintVouchers[voucher.tokenId] = voucher;
+
+        if (voucher.tokenId >= _nextTokenId) {
+            _nextTokenId = voucher.tokenId + 1;
+        }
+
+        // Transfer the minting fee to the contract owner
+        payable(owner()).transfer(msg.value);
     }
 
-    function buyNFT(uint256 _listingId) external payable nonReentrant {
-        Listing storage listing = listings[_listingId];
-        require(listing.isListed, "NFT not listed");
-        require(msg.value >= listing.price, "Insufficient payment");
-        require(block.timestamp <= listing.deadline, "Listing has expired");
+    event Debug(
+        string message,
+        uint256 tokenId,
+        string tokenURI,
+        address creator,
+        address recoveredSigner,
+        bytes32 digest
+    );
 
-        listing.isListed = false;
-        IERC721(listing.nftContract).safeTransferFrom(address(this), msg.sender, listing.tokenId);
+    event SignatureDebug(bytes32 digest, address signer, address creator);
 
-        payable(listing.seller).transfer(listing.price);
+    function _verify(LazyMintVoucher calldata voucher) internal returns (bool) {
+        bytes32 digest = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    MINTING_TYPEHASH,
+                    voucher.tokenId,
+                    keccak256(bytes(voucher.tokenURI)),
+                    voucher.creator
+                )
+            )
+        );
 
-        emit NFTSold(_listingId, listing.nftContract, listing.tokenId, listing.seller, msg.sender, listing.price);
+        address signer = ECDSA.recover(digest, voucher.signature);
+
+        emit SignatureDebug(digest, signer, voucher.creator);
+
+        return signer == voucher.creator;
+    }
+    event Debug(
+        string message,
+        uint256 tokenId,
+        string tokenURI,
+        address addr,
+        bytes32 data
+    );
+
+    function tokenURI(
+        uint256 tokenId
+    ) public view virtual override returns (string memory) {
+        require(
+            _ownerOf(tokenId) != address(0),
+            "ERC721Metadata: URI query for nonexistent token"
+        );
+
+        string memory _tokenURI = _tokenURIs[tokenId];
+
+        if (bytes(_tokenURI).length > 0) {
+            return _tokenURI;
+        }
+
+        if (_lazyMintVouchers[tokenId].creator != address(0)) {
+            return _lazyMintVouchers[tokenId].tokenURI;
+        }
+
+        return "";
     }
 
-    function cancelListing(uint256 _listingId) external nonReentrant {
-        Listing storage listing = listings[_listingId];
-        require(listing.isListed, "NFT not listed");
-        require(listing.seller == msg.sender, "Not the seller");
-
-        listing.isListed = false;
-        IERC721(listing.nftContract).safeTransferFrom(address(this), msg.sender, listing.tokenId);
-
-        emit ListingCanceled(_listingId, listing.nftContract, listing.tokenId, msg.sender);
+    function _setTokenURI(
+        uint256 tokenId,
+        string memory _tokenURI
+    ) internal virtual {
+        require(
+            _ownerOf(tokenId) != address(0),
+            "ERC721Metadata: URI set of nonexistent token"
+        );
+        _tokenURIs[tokenId] = _tokenURI;
     }
 
-    function getNonce(address user) external view returns (uint256) {
-        return _nonces[user];
+    function getDomainSeparator() public view returns (bytes32) {
+        return _domainSeparatorV4();
     }
 
-    function getListingDetails(uint256 _listingId) external view returns (Listing memory) {
-        return listings[_listingId];
-    }
-
-    function getSellerListings(address seller) public view returns (uint256[] memory) {
-        return sellerListings[seller];
-    }
-
-    function getAllListingIds() public view returns (uint256[] memory) {
-        return allListingIds;
+    function getTypedDataHash(
+        LazyMintVoucher calldata voucher
+    ) public view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        MINTING_TYPEHASH,
+                        voucher.tokenId,
+                        keccak256(bytes(voucher.tokenURI)),
+                        voucher.creator
+                    )
+                )
+            );
     }
 }
-
-
-// I Want you to write an NFT MarketPlace Contract which should be fully functional and secure.
-// The contract should support the following functionalities:
-// 1. List an NFT for sale
-// 2. Buy an NFT
-// 3. Cancel a listing
-// 4. Get listing details
-// 5. Get all listings
-// 6. Get all listings for a seller
-// It should be fully implementation of EIP712 with Lazy Minting!
-// When user mints an NFT, We have to store it's metamadata signature and every other thing which
-// is complasory for an functionality. of EIP712 and Lazy Minting. But it should be truely Lazy Minting.
-// The user who mints it he actually uploaded the data but the person who buys it will pay the fee for minting and buying i mean actual minting will be happened then. I hope you understand!
