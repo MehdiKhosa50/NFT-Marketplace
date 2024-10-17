@@ -4,6 +4,7 @@ import NavBar from '../NavBar/NavBar';
 import { Container, Grid, Card, CardMedia, CardContent, Typography, Box, Button, CircularProgress } from '@mui/material';
 import { NFTMarketplace_ADDRESS, NFTMarketplace_ABI } from '../../constant';
 import { NFTContext } from '../../context/NFTContext';
+import axios from 'axios';
 
 const Home = () => {
     const { account } = useContext(NFTContext);
@@ -13,29 +14,22 @@ const Home = () => {
 
     useEffect(() => {
         if (typeof window.ethereum !== 'undefined' && account) {
-            fetchNFTs();
+            fetchAllNFTs();
         }
     }, [account]);
-    
-    const fetchNFTs = async () => {
+
+    const fetchAllNFTs = async () => {
         setError(null);
         setLoading(true);
         try {
-            const provider = new ethers.BrowserProvider(window.ethereum);
-            const signer = await provider.getSigner();
-    
-            const marketplaceContract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
-    
-            const nextTokenId = await marketplaceContract.getNextTokenId();
-            
-            const nftPromises = [];
-            for (let i = 0; i < nextTokenId; i++) {
-                nftPromises.push(fetchNFTDetails(marketplaceContract, i));
-            }
-            
-            const fetchedNFTs = await Promise.all(nftPromises);
-            const filteredNFTs = fetchedNFTs.filter(nft => nft !== null);
-            setNFTs(filteredNFTs);
+            console.log('Fetching lazy minted NFTs...');
+            const lazyMintedNFTs = getLazyMintedNFTs();
+            console.log('Lazy minted NFTs:', lazyMintedNFTs);
+            const onChainNFTs = await fetchOnChainNFTs();
+            console.log('On-chain NFTs:', onChainNFTs);
+            const allNFTs = [...lazyMintedNFTs, ...onChainNFTs];
+            console.log('All NFTs:', allNFTs);
+            setNFTs(allNFTs);
         } catch (error) {
             console.error("Error fetching NFTs:", error);
             setError(error.message || "An unknown error occurred");
@@ -44,70 +38,98 @@ const Home = () => {
         }
     };
 
-    const fetchNFTDetails = async (contract, tokenId) => {
+    const getLazyMintedNFTs = () => {
+        const storedNFTs = localStorage.getItem('lazyMintedNFTs');
+        return storedNFTs ? JSON.parse(storedNFTs) : [];
+    };
+
+    const fetchOnChainNFTs = async () => {
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, provider);
+
+        const nextTokenId = await contract.getNextTokenId();
+        const nftPromises = [];
+
+        for (let i = 0; i < nextTokenId; i++) {
+            nftPromises.push(fetchNFTData(i, contract));
+        }
+
+        const nftData = await Promise.all(nftPromises);
+        return nftData.filter(nft => nft !== null);
+    };
+
+    const fetchNFTData = async (tokenId, contract) => {
         try {
             const owner = await contract.ownerOf(tokenId);
+            if (owner === ethers.ZeroAddress) return null;
+
             const tokenURI = await contract.tokenURI(tokenId);
-            const listing = await contract.getListing(tokenId);
-
-            // Check if it's a lazy-minted NFT
-            const lazyMintVoucher = await contract.getLazyMintVoucher(tokenId);
-
-            let metadata;
-            if (tokenURI.startsWith('ipfs://')) {
-                const response = await fetch(tokenURI.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'));
-                metadata = await response.json();
-            } else {
-                metadata = { name: `NFT #${tokenId}`, image: 'placeholder-image-url' };
+            if (!tokenURI) {
+                console.error(`No tokenURI found for token ${tokenId}`);
+                return null;
             }
+            const metadata = await fetchIPFSMetadata(tokenURI);
 
             return {
                 id: tokenId.toString(),
-                owner: owner,
-                image: metadata.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/'),
-                name: metadata.name,
-                price: listing.active ? ethers.formatEther(listing.price.toString()) : null,
-                seller: listing.active ? listing.seller : null,
-                isLazyMinted: lazyMintVoucher.creator !== ethers.ZeroAddress,
-                creator: lazyMintVoucher.creator !== ethers.ZeroAddress ? lazyMintVoucher.creator : owner
+                tokenURI,
+                price: metadata.price || '0',
+                creator: metadata.creator || owner,
+                name: metadata.name || `NFT #${tokenId}`,
+                description: metadata.description || '',
+                image: metadata.image || '',
+                isLazyMinted: false
             };
         } catch (error) {
-            console.error(`Error processing NFT ${tokenId}:`, error);
+            console.error(`Error fetching NFT data for token ${tokenId}:`, error);
             return null;
         }
     };
 
-    const buyNFT = async (tokenId, price) => {
+    const fetchIPFSMetadata = async (tokenURI) => {
+        if (!tokenURI || !tokenURI.startsWith('ipfs://')) {
+            console.error('Invalid tokenURI format:', tokenURI);
+            return {};
+        }
         try {
-            const provider = new ethers.BrowserProvider(window.ethereum);
-            const signer = await provider.getSigner();
-            const marketplaceContract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
-
-            const tx = await marketplaceContract.buyNFT(tokenId, { value: ethers.parseEther(price) });
-            await tx.wait();
-
-            console.log("NFT purchased successfully!");
-            fetchNFTs();
+            const ipfsHash = tokenURI.replace('ipfs://', '');
+            const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${ipfsHash}`);
+            return response.data;
         } catch (error) {
-            console.error("Error buying NFT:", error);
-            setError("Failed to buy NFT. Please try again.");
+            console.error("Error fetching IPFS metadata:", error);
+            return {};
         }
     };
 
-    const finalizeLazyMint = async (tokenId) => {
+    const buyNFT = async (nft) => {
         try {
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
-            const marketplaceContract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
+            const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
-            const tx = await marketplaceContract.finalizeLazyMint(tokenId);
+            const price = ethers.parseEther(ethers.formatEther(nft.price));
+
+            const voucher = {
+                tokenId: nft.id,
+                tokenURI: nft.tokenURI,
+                price: price,
+                creator: nft.creator,
+                signature: nft.signature
+            };
+
+            const tx = await contract.lazyMintNFT(voucher, { value: price });
             await tx.wait();
 
-            console.log("Lazy minted NFT finalized successfully!");
-            fetchNFTs();
+            console.log("NFT purchased successfully!");
+
+            // Remove the purchased NFT from local storage
+            const lazyMintedNFTs = getLazyMintedNFTs().filter(item => item.id !== nft.id);
+            localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
+
+            fetchAllNFTs();
         } catch (error) {
-            console.error("Error finalizing lazy minted NFT:", error);
-            setError("Failed to finalize lazy minted NFT. Please try again.");
+            console.error("Error buying NFT:", error);
+            setError("Failed to buy NFT. Please try again.");
         }
     };
 
@@ -128,7 +150,7 @@ const Home = () => {
                                 <CardMedia
                                     component="img"
                                     height="250"
-                                    image={nft.image}
+                                    image={nft.image ? nft.image.replace('ipfs://', 'https://gateway.pinata.cloud/ipfs/') : ''}
                                     alt={nft.name}
                                     sx={{ objectFit: 'cover' }}
                                 />
@@ -144,47 +166,33 @@ const Home = () => {
                                         <Typography variant="h6" color="primary">
                                             {nft.name}
                                         </Typography>
-                                        {nft.price && (
-                                            <Typography variant="body1" color="secondary" fontWeight="bold">
-                                                {nft.price} ETH
-                                            </Typography>
-                                        )}
+                                        <Typography variant="body1" color="secondary" fontWeight="bold">
+                                            {ethers.formatEther(nft.price)} ETH
+                                        </Typography>
                                     </Box>
                                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                                        Owner: {nft.owner.slice(0, 6)}...{nft.owner.slice(-4)}
+                                        {nft.description}
                                     </Typography>
-                                    {nft.isLazyMinted && (
-                                        <Typography variant="body2" color="text.secondary">
-                                            Status: Lazy Minted
-                                        </Typography>
-                                    )}
-                                    {nft.creator !== nft.owner && (
-                                        <Typography variant="body2" color="text.secondary">
-                                            Creator: {nft.creator.slice(0, 6)}...{nft.creator.slice(-4)}
-                                        </Typography>
-                                    )}
-                                    {nft.price && (
-                                        <Button
-                                            variant="contained"
-                                            color="primary"
-                                            fullWidth
-                                            sx={{ mt: 2 }}
-                                            onClick={() => buyNFT(nft.id, nft.price)}
-                                        >
-                                            Buy for {nft.price} ETH
-                                        </Button>
-                                    )}
-                                    {nft.isLazyMinted && nft.creator === account && (
-                                        <Button
-                                            variant="contained"
-                                            color="secondary"
-                                            fullWidth
-                                            sx={{ mt: 2 }}
-                                            onClick={() => finalizeLazyMint(nft.id)}
-                                        >
-                                            Finalize Minting
-                                        </Button>
-                                    )}
+                                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                                        Creator: {nft.creator.slice(0, 6)}...{nft.creator.slice(-4)}
+                                    </Typography>
+                                    <Typography variant="body2" color={nft.isLazyMinted ? "success.main" : "info.main"} sx={{ mt: 1 }}>
+                                        {nft.isLazyMinted ? "Lazy Minted" : "On-Chain"}
+                                    </Typography>
+                                    <Button
+                                        variant="contained"
+                                        color="primary"
+                                        fullWidth
+                                        sx={{ mt: 2 }}
+                                        onClick={() => buyNFT(nft)}
+                                        disabled={nft.creator.toLowerCase() === account.toLowerCase() || !nft.isLazyMinted}
+                                    >
+                                        {nft.creator.toLowerCase() === account.toLowerCase()
+                                            ? 'You created this NFT'
+                                            : nft.isLazyMinted
+                                                ? 'Buy NFT'
+                                                : 'Already Purchased'}
+                                    </Button>
                                 </CardContent>
                             </Card>
                         </Grid>
