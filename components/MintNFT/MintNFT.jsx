@@ -1,6 +1,3 @@
-
-
-
 import React, { useState, useContext } from 'react';
 import { Button, TextField, Typography, Box, CircularProgress, Snackbar } from '@mui/material';
 import { NFTContext } from '../../context/NFTContext';
@@ -23,43 +20,35 @@ const MintNFT = () => {
     const handleFileChange = (event) => {
         const selectedFile = event.target.files[0];
         setFile(selectedFile);
-        console.log("Selected file: ", selectedFile);
         setPreviewUrl(URL.createObjectURL(selectedFile));
     };
 
-    const uploadToPinata = async () => {
-        if (!file) return null;
+    const uploadToPinata = async (content, options = {}) => {
         try {
-            const formData = new FormData();
-            formData.append('file', file);
-
-            const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                    'pinata_api_key': '4617d86f48917c7684bb',
-                    'pinata_secret_api_key': '36ba99ab9e33c6e030c8c3ff6146f01aa7cb8b55031650855f81d403770eb4b0'
-                }
-            });
-
-            const imgHash = response.data.IpfsHash;
-            console.log('Image hash:', imgHash);
-
-            const metadataResponse = await axios.post('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-                name,
-                description,
-                image: `ipfs://${imgHash}`,
-            }, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'pinata_api_key': '4617d86f48917c7684bb',
-                    'pinata_secret_api_key': '36ba99ab9e33c6e030c8c3ff6146f01aa7cb8b55031650855f81d403770eb4b0'
-                },
-            });
-
-            return metadataResponse.data.IpfsHash;
+            let response;
+            if (content instanceof File) {
+                const formData = new FormData();
+                formData.append('file', content);
+                response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data',
+                        'pinata_api_key': '4617d86f48917c7684bb',
+                        'pinata_secret_api_key': '36ba99ab9e33c6e030c8c3ff6146f01aa7cb8b55031650855f81d403770eb4b0'
+                    }
+                });
+            } else {
+                response = await axios.post('https://api.pinata.cloud/pinning/pinJSONToIPFS', content, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'pinata_api_key': '4617d86f48917c7684bb',
+                        'pinata_secret_api_key': '36ba99ab9e33c6e030c8c3ff6146f01aa7cb8b55031650855f81d403770eb4b0'
+                    }
+                });
+            }
+            return response.data.IpfsHash;
         } catch (error) {
             console.error('Error uploading to Pinata:', error);
-            return null;
+            throw error;
         }
     };
 
@@ -70,8 +59,8 @@ const MintNFT = () => {
         }
         setLoading(true);
         try {
-            const metadataHash = await uploadToPinata();
-            if (!metadataHash) throw new Error('Failed to upload to IPFS');
+            const imageHash = await uploadToPinata(file);
+            if (!imageHash) throw new Error('Failed to upload image to IPFS');
 
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
@@ -100,36 +89,36 @@ const MintNFT = () => {
                 ]
             };
 
+            const tokenURI = `ipfs://${imageHash}`;
+
             const value = {
-                tokenId: tokenId,
-                tokenURI: `ipfs://${metadataHash}`,
-                price: priceInWei,
+                tokenId: tokenId.toString(),
+                tokenURI: tokenURI,
+                price: priceInWei.toString(),
                 creator: account,
-                expirationTime: expirationTime
+                expirationTime: expirationTime.toString()
             };
 
             const signature = await signer.signTypedData(domain, types, value);
 
-            console.log("Token ID: ", tokenId);
-            console.log("Domain: ", domain);
-            console.log("Types: ", types);
-            console.log("Value: ", value);
-            console.log("Signature: ", signature);
-
-            const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs') || '[]');
-            lazyMintedNFTs.push({
-                id: tokenId.toString(),
-                tokenURI: `ipfs://${metadataHash}`,
-                price: priceInWei.toString(),
-                creator: account,
-                signature: signature,
+            // Create full metadata including voucher data and signature
+            const fullMetadata = {
                 name,
                 description,
-                image: `ipfs://${metadataHash}`,
-                expirationTime: expirationTime
-            });
-            localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
+                image: tokenURI,
+                tokenId: tokenId.toString(),
+                tokenURI: tokenURI,
+                price: priceInWei.toString(),
+                creator: account,
+                expirationTime: expirationTime.toString(),
+                signature: signature
+            };
 
+            const metadataHash = await uploadToPinata(fullMetadata);
+
+            const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs') || '[]');
+            lazyMintedNFTs.push(fullMetadata);
+            localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
             showSnackbar('NFT lazy minted successfully!', 'success');
             resetForm();
         } catch (error) {

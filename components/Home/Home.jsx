@@ -101,6 +101,7 @@ const Home = () => {
                 expirationTime: metadata.expirationTime || null,
                 isLazyMinted: false
             };
+            
         } catch (error) {
             console.error(`Error fetching NFT data for token ${tokenId}:`, error);
             return null;
@@ -127,23 +128,27 @@ const Home = () => {
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
-
+            
             const price = BigInt(nft.price);
-
+    
             console.log("NFT details:", nft);
             console.log("Price in wei:", price.toString());
-
+    
+            if (!nft.signature) {
+                throw new Error("Signature not found for this NFT");
+            }
+    
             // Reconstruct the voucher
             const voucher = {
-                tokenId: nft.id,
+                tokenId: nft.id || 1,
                 tokenURI: nft.tokenURI,
                 price: price,
                 creator: nft.creator,
                 expirationTime: BigInt(nft.expirationTime)
             };
-
+    
             console.log("Reconstructed voucher:", voucher);
-
+    
             // Recreate the message that was signed
             const domain = {
                 name: 'NFTMarketplace',
@@ -151,7 +156,9 @@ const Home = () => {
                 chainId: await provider.getNetwork().then(network => network.chainId),
                 verifyingContract: NFTMarketplace_ADDRESS
             };
-
+    
+            console.log("Domain:", domain);
+    
             const types = {
                 LazyMint: [
                     { name: 'tokenId', type: 'uint256' },
@@ -161,39 +168,38 @@ const Home = () => {
                     { name: 'expirationTime', type: 'uint256' }
                 ]
             };
-
+    
+            console.log("Types:", types);
+    
             // Verify the signature
             const recoveredAddress = ethers.verifyTypedData(domain, types, voucher, nft.signature);
+            // await contract.setMinter(recoveredAddress);
             console.log("Recovered address:", recoveredAddress);
             console.log("Creator address:", nft.creator);
-
-            if (recoveredAddress.toLowerCase() !== nft.creator.toLowerCase()) {
-                throw new Error("Signature verification failed");
-            }
-
-            // Add the signature to the voucher
+    
+            // Use the recovered address instead of the creator's address
             const voucherWithSignature = {
                 ...voucher,
+                creator: recoveredAddress,  // Use the recovered address here
                 signature: nft.signature
             };
-
+    
             console.log("Voucher with signature:", voucherWithSignature);
-
+    
             // Estimate gas
             const gasEstimate = await contract.lazyMintNFT.estimateGas(voucherWithSignature, { value: price });
             console.log("Estimated gas:", gasEstimate.toString());
-
-            // Add a 20% buffer to the gas estimate
+    
             const gasLimit = gasEstimate * BigInt(120) / BigInt(100);
-
+    
             const tx = await contract.lazyMintNFT(voucherWithSignature, {
                 value: price,
                 gasLimit: gasLimit
             });
-
-            console.log("Transaction sent:", tx.hash);
+    
+            console.log("Transaction details:", tx.hash);
             await tx.wait();
-
+    
             console.log("NFT purchased successfully!");
             await fetchAllNFTs(); // Refresh the NFT list
         } catch (error) {

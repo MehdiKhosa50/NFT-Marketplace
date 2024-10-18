@@ -3,41 +3,49 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "../node_modules/@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "../node_modules/@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./Libraries/Counters.sol";
 
 contract NFTMarketplace is ERC721, EIP712, ReentrancyGuard, Ownable {
     using ECDSA for bytes32;
+    using Counters for Counters.Counter;
 
-    bytes32 private constant MINTING_TYPEHASH =
-        keccak256("LazyMint(uint256 tokenId,string tokenURI,address creator)");
+    Counters.Counter private _tokenIds;
 
-    struct Listing {
-        uint256 tokenId;
-        address seller;
-        uint256 price;
-        bool active;
-    }
+    bytes32 private constant LAZY_MINT_TYPEHASH =
+        keccak256("LazyMint(uint256 tokenId,string tokenURI,uint256 price,address creator,uint256 expirationTime)");
+    bytes32 private constant CANCEL_LISTING_TYPEHASH =
+        keccak256("CancelListing(uint256 tokenId,address creator)");
 
     struct LazyMintVoucher {
         uint256 tokenId;
         string tokenURI;
+        uint256 price;
+        address creator;
+        uint256 expirationTime;
+        bytes signature;
+    }
+
+    struct CancelListingVoucher {
+        uint256 tokenId;
         address creator;
         bytes signature;
     }
 
-    mapping(uint256 => Listing) private _listings;
-    mapping(uint256 => LazyMintVoucher) private _lazyMintVouchers;
-    mapping(address => uint256[]) private _sellerListings;
     mapping(uint256 => string) private _tokenURIs;
+    mapping(address => uint256[]) public sellerListings;
+    mapping(uint256 => bool) public canceledListings;
 
-    uint256 private _nextTokenId;
+    address public minter;
 
-    event NFTListed(
+    event NFTLazyMinted(
         uint256 indexed tokenId,
-        address indexed seller,
-        uint256 price
+        address indexed creator,
+        string tokenURI,
+        uint256 price,
+        uint256 expirationTime
     );
     event NFTSold(
         uint256 indexed tokenId,
@@ -45,196 +53,124 @@ contract NFTMarketplace is ERC721, EIP712, ReentrancyGuard, Ownable {
         address indexed buyer,
         uint256 price
     );
-    event ListingCancelled(uint256 indexed tokenId, address indexed seller);
+    event ListingCanceled(uint256 indexed tokenId, address indexed creator);
+    event Signer(address indexed signer);
 
     constructor(
         string memory name,
-        string memory symbol
-    ) ERC721(name, symbol) EIP712(name, "1") Ownable(msg.sender) {}
-
-    function isApprovedOrOwner(
-        address spender,
-        uint256 tokenId
-    ) public view returns (bool) {
-        address owner = ownerOf(tokenId);
-        return (spender == owner ||
-            isApprovedForAll(owner, spender) ||
-            getApproved(tokenId) == spender);
+        string memory symbol,
+        address _minter
+    ) ERC721(name, symbol) EIP712(name, "1") Ownable(msg.sender) {
+        minter = _minter;
     }
 
-    function listNFT(uint256 tokenId, uint256 price) external {
-        require(
-            isApprovedOrOwner(_msgSender(), tokenId),
-            "Not approved or owner"
-        );
-        require(price > 0, "Price must be greater than zero");
-
-        _listings[tokenId] = Listing(tokenId, _msgSender(), price, true);
-        _sellerListings[_msgSender()].push(tokenId);
-
-        emit NFTListed(tokenId, _msgSender(), price);
-    }
-
-    function buyNFT(uint256 tokenId) external payable nonReentrant {
-        Listing storage listing = _listings[tokenId];
-        require(listing.active, "Listing is not active");
-        require(msg.value >= listing.price, "Insufficient payment");
-
-        address seller = listing.seller;
-        uint256 price = listing.price;
-
-        listing.active = false;
-
-        _safeTransfer(seller, _msgSender(), tokenId, "");
-
-        payable(seller).transfer(price);
-
-        if (msg.value > price) {
-            payable(_msgSender()).transfer(msg.value - price);
-        }
-
-        emit NFTSold(tokenId, seller, _msgSender(), price);
-    }
-
-    function cancelListing(uint256 tokenId) external {
-        require(_listings[tokenId].seller == _msgSender(), "Not the seller");
-        require(_listings[tokenId].active, "Listing is not active");
-
-        delete _listings[tokenId];
-
-        emit ListingCancelled(tokenId, _msgSender());
-    }
-
-    function getListing(
-        uint256 tokenId
-    ) external view returns (Listing memory) {
-        return _listings[tokenId];
-    }
-
-    function getNextTokenId() external view returns (uint256) {
-        return _nextTokenId;
-    }
-
-    function getSellerListings(
-        address seller
-    ) external view returns (uint256[] memory) {
-        return _sellerListings[seller];
-    }
-
-    function lazyMint(
-        LazyMintVoucher calldata voucher
-    ) external payable nonReentrant {
-        require(msg.value > 0, "Payment required for minting");
-
-        emit Debug(
-            "LazyMint called",
-            voucher.tokenId,
-            voucher.tokenURI,
-            voucher.creator,
-            bytes32(voucher.signature)
-        );
-
+    function lazyMintNFT(LazyMintVoucher calldata voucher) external payable nonReentrant {
+        require(msg.value >= voucher.price, "Insufficient payment");
+     emit Signer(minter);
         require(_verify(voucher), "Invalid signature");
+        require(block.timestamp <= voucher.expirationTime, "Voucher has expired");
+        require(!canceledListings[voucher.tokenId], "Listing has been canceled");
 
-        _safeMint(voucher.creator, voucher.tokenId);
-        _setTokenURI(voucher.tokenId, voucher.tokenURI);
+        _tokenIds.increment();
+        uint256 newTokenId = _tokenIds.current();
 
-        _lazyMintVouchers[voucher.tokenId] = voucher;
+        _safeMint(msg.sender, newTokenId);
+        _setTokenURI(newTokenId, voucher.tokenURI);
 
-        if (voucher.tokenId >= _nextTokenId) {
-            _nextTokenId = voucher.tokenId + 1;
+        sellerListings[voucher.creator].push(newTokenId);
+
+        payable(voucher.creator).transfer(voucher.price);
+
+        if (msg.value > voucher.price) {
+            payable(msg.sender).transfer(msg.value - voucher.price);
         }
 
-        // Transfer the minting fee to the contract owner
-        payable(owner()).transfer(msg.value);
+        emit NFTLazyMinted(newTokenId, voucher.creator, voucher.tokenURI, voucher.price, voucher.expirationTime);
+        emit NFTSold(newTokenId, voucher.creator, msg.sender, voucher.price);
     }
 
-    event Debug(
-        string message,
-        uint256 tokenId,
-        string tokenURI,
-        address creator,
-        address recoveredSigner,
-        bytes32 digest
-    );
+    function cancelListing(CancelListingVoucher calldata voucher) external {
+        require(_verifyCancelListing(voucher), "Invalid signature");
+        require(!canceledListings[voucher.tokenId], "Listing already canceled");
 
-    event SignatureDebug(bytes32 digest, address signer, address creator);
+        canceledListings[voucher.tokenId] = true;
 
-    function _verify(LazyMintVoucher calldata voucher) internal returns (bool) {
+        emit ListingCanceled(voucher.tokenId, voucher.creator);
+    }
+
+    function _verify(LazyMintVoucher calldata voucher) internal view returns (bool) {
         bytes32 digest = _hashTypedDataV4(
             keccak256(
                 abi.encode(
-                    MINTING_TYPEHASH,
+                    LAZY_MINT_TYPEHASH,
                     voucher.tokenId,
                     keccak256(bytes(voucher.tokenURI)),
+                    voucher.price,
+                    voucher.creator,
+                    voucher.expirationTime
+                )
+            )
+        );
+
+        address signer = ECDSA.recover(digest, voucher.signature);
+        
+        return signer == minter;
+    }
+
+    function _verifyCancelListing(CancelListingVoucher calldata voucher) internal returns (bool) {
+        bytes32 digest = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    CANCEL_LISTING_TYPEHASH,
+                    voucher.tokenId,
                     voucher.creator
                 )
             )
         );
 
         address signer = ECDSA.recover(digest, voucher.signature);
-
-        emit SignatureDebug(digest, signer, voucher.creator);
-
-        return signer == voucher.creator;
-    }
-    event Debug(
-        string message,
-        uint256 tokenId,
-        string tokenURI,
-        address addr,
-        bytes32 data
-    );
-
-    function tokenURI(
-        uint256 tokenId
-    ) public view virtual override returns (string memory) {
-        require(
-            _ownerOf(tokenId) != address(0),
-            "ERC721Metadata: URI query for nonexistent token"
-        );
-
-        string memory _tokenURI = _tokenURIs[tokenId];
-
-        if (bytes(_tokenURI).length > 0) {
-            return _tokenURI;
-        }
-
-        if (_lazyMintVouchers[tokenId].creator != address(0)) {
-            return _lazyMintVouchers[tokenId].tokenURI;
-        }
-
-        return "";
+       //return signer == minter || signer == owner();
+        
     }
 
-    function _setTokenURI(
-        uint256 tokenId,
-        string memory _tokenURI
-    ) internal virtual {
-        require(
-            _ownerOf(tokenId) != address(0),
-            "ERC721Metadata: URI set of nonexistent token"
-        );
+    function tokenURI(uint256 tokenId) public view virtual override returns (string memory) {
+        require(ownerOf(tokenId) != address(0), "ERC721Metadata: URI query for nonexistent token");
+        return _tokenURIs[tokenId];
+    }
+
+    function _setTokenURI(uint256 tokenId, string memory _tokenURI) internal virtual {
+        require(ownerOf(tokenId) != address(0), "ERC721Metadata: URI set of nonexistent token");
         _tokenURIs[tokenId] = _tokenURI;
+    }
+
+    function getNextTokenId() external view returns (uint256) {
+        return _tokenIds.current() + 1;
     }
 
     function getDomainSeparator() public view returns (bytes32) {
         return _domainSeparatorV4();
     }
 
-    function getTypedDataHash(
-        LazyMintVoucher calldata voucher
-    ) public view returns (bytes32) {
-        return
-            _hashTypedDataV4(
-                keccak256(
-                    abi.encode(
-                        MINTING_TYPEHASH,
-                        voucher.tokenId,
-                        keccak256(bytes(voucher.tokenURI)),
-                        voucher.creator
-                    )
+    function getTypedDataHash(LazyMintVoucher calldata voucher) public view returns (bytes32) {
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    LAZY_MINT_TYPEHASH,
+                    voucher.tokenId,
+                    keccak256(bytes(voucher.tokenURI)),
+                    voucher.price,
+                    voucher.creator,
+                    voucher.expirationTime
                 )
-            );
+            )
+        );
+    }
+    
+    function getSellerListings(address seller) external view returns (uint256[] memory) {
+        return sellerListings[seller];
+    }
+
+    function setMinter(address newMinter) external onlyOwner {
+        minter = newMinter;
     }
 }
