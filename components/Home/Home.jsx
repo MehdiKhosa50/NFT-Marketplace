@@ -151,7 +151,7 @@ const Home = () => {
     
             // Recreate the message that was signed
             const domain = {
-                name: 'NFTMarketplace',
+                name: 'LazyMint',
                 version: '1',
                 chainId: await provider.getNetwork().then(network => network.chainId),
                 verifyingContract: NFTMarketplace_ADDRESS
@@ -169,7 +169,6 @@ const Home = () => {
                 ]
             };
     
-            console.log("Types:", types);
     
             // Verify the signature
             const recoveredAddress = ethers.verifyTypedData(domain, types, voucher, nft.signature);

@@ -53,27 +53,27 @@ const MintNFT = () => {
     };
 
     const lazyMintNFT = async () => {
-        if (!file || !name || !description || !price || !account || !expirationDate) {
-            showSnackbar('Please fill all fields and connect your wallet', 'warning');
-            return;
-        }
+        // if (!file || !name || !description || !price || !account || !expirationDate) {
+        //     showSnackbar('Please fill all fields and connect your wallet', 'warning');
+        //     return;
+        // }
         setLoading(true);
         try {
-            const imageHash = await uploadToPinata(file);
-            if (!imageHash) throw new Error('Failed to upload image to IPFS');
+            // const imageHash = await uploadToPinata(file);
+            // if (!imageHash) throw new Error('Failed to upload image to IPFS');
 
             const provider = new ethers.BrowserProvider(window.ethereum);
             const signer = await provider.getSigner();
             const contract = new ethers.Contract(NFTMarketplace_ADDRESS, NFTMarketplace_ABI, signer);
 
-            const tokenId = await contract.getNextTokenId();
-            const priceInWei = ethers.parseEther(price);
-            const expirationTime = Math.floor(new Date(expirationDate).getTime() / 1000);
+            // const tokenId = await contract.getNextTokenId();
+            // const priceInWei = ethers.parseEther(price);
+            // const expirationTime = Math.floor(new Date(expirationDate).getTime() / 1000);
 
             const chainId = await provider.getNetwork().then(network => network.chainId);
 
             const domain = {
-                name: "NFTMarketplace",
+                name: "LazyMint",
                 version: "1",
                 chainId: chainId,
                 verifyingContract: NFTMarketplace_ADDRESS
@@ -89,38 +89,64 @@ const MintNFT = () => {
                 ]
             };
 
-            const tokenURI = `ipfs://${imageHash}`;
+            // const tokenURI = `ipfs://${imageHash}`;
 
-            const value = {
-                tokenId: tokenId.toString(),
-                tokenURI: tokenURI,
-                price: priceInWei.toString(),
-                creator: account,
-                expirationTime: expirationTime.toString()
+            // let voucher = {
+            //     tokenId: tokenId.toString(),
+            //     tokenURI: tokenURI,
+            //     price: priceInWei.toString(),
+            //     creator: account,
+            //     expirationTime: expirationTime.toString()
+            // };
+
+            let voucher = {
+                tokenId: 1,
+                tokenURI: "ipfs://QmWpGWz9APcgfCjvoH9nHq8oD1e7pELzY4wPXvwxJdeBwD",
+                price: ethers.parseEther("0.01"),
+                creator: "0x01428254bacea6C2bE6e02e427E8624440Ec6146",
+                expirationTime: 10000000000000
             };
 
-            const signature = await signer.signTypedData(domain, types, value);
+            const signature = await signer.signTypedData(domain, types, voucher);
 
-            // Create full metadata including voucher data and signature
-            const fullMetadata = {
-                name,
-                description,
-                image: tokenURI,
-                tokenId: tokenId.toString(),
-                tokenURI: tokenURI,
-                price: priceInWei.toString(),
-                creator: account,
-                expirationTime: expirationTime.toString(),
+            const recoveredAddress = ethers.verifyTypedData(domain, types, voucher, signature);
+            // await contract.setMinter(recoveredAddress);
+            console.log("Recovered address:", recoveredAddress);
+
+            voucher = {
+                tokenId: 1,
+                tokenURI: "ipfs://QmWpGWz9APcgfCjvoH9nHq8oD1e7pELzY4wPXvwxJdeBwD",
+                price: ethers.parseEther("0.01"),
+                creator: "0x01428254bacea6C2bE6e02e427E8624440Ec6146",
+                expirationTime: 10000000000000,
                 signature: signature
             };
 
-            const metadataHash = await uploadToPinata(fullMetadata);
+            const tx = await contract.lazyMintNFT(voucher, {
+                value: ethers.parseEther("0.01")
+            });
 
-            const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs') || '[]');
-            lazyMintedNFTs.push(fullMetadata);
-            localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
-            showSnackbar('NFT lazy minted successfully!', 'success');
-            resetForm();
+
+            // // Create full metadata including voucher data and signature
+            // const fullMetadata = {
+            //     name,
+            //     description,
+            //     image: tokenURI,
+            //     tokenId: tokenId.toString(),
+            //     tokenURI: tokenURI,
+            //     price: priceInWei.toString(),
+            //     creator: account,
+            //     expirationTime: expirationTime.toString(),
+            //     signature: signature
+            // };
+
+            // const metadataHash = await uploadToPinata(fullMetadata);
+
+            // const lazyMintedNFTs = JSON.parse(localStorage.getItem('lazyMintedNFTs') || '[]');
+            // lazyMintedNFTs.push(fullMetadata);
+            // localStorage.setItem('lazyMintedNFTs', JSON.stringify(lazyMintedNFTs));
+            // showSnackbar('NFT lazy minted successfully!', 'success');
+            // resetForm();
         } catch (error) {
             console.error("Error lazy minting NFT:", error);
             showSnackbar('Failed to lazy mint NFT', 'error');
@@ -223,7 +249,7 @@ const MintNFT = () => {
                 onClick={lazyMintNFT}
                 fullWidth
                 sx={{ mt: 3 }}
-                disabled={loading || !file || !name || !description || !price || !account || !expirationDate}
+            // disabled={loading || !file || !name || !description || !price || !account || !expirationDate}
             >
                 {loading ? <CircularProgress size={24} /> : 'Lazy Mint NFT'}
             </Button>
