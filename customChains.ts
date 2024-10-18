@@ -48,13 +48,13 @@ export const amoyPolygon: Chain = {
   testnet: true,
 }
 
-export const hardhatNetwork: Chain = {
-  id: 31337,
-  name: 'Hardhat',
+export const ganache: Chain = {
+  id: 1337,
+  name: 'Ganache',
   nativeCurrency: {
     decimals: 18,
-    name: 'GO',
-    symbol: 'GO',
+    name: 'ETH',
+    symbol: 'ETH',
   },
   rpcUrls: {
     default: {

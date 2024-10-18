@@ -8,7 +8,7 @@ import {
   sepolia,
 } from 'wagmi/chains';
 
-import { vanguardTestnet, hardhatNetwork, amoyPolygon } from './customChains';
+import { vanguardTestnet, ganache, amoyPolygon } from './customChains';
 
 export const config = getDefaultConfig({
   appName: 'PeoplesDex',
@@ -20,7 +20,7 @@ export const config = getDefaultConfig({
     arbitrum,
     base,
     vanguardTestnet,
-    hardhatNetwork,
+    ganache,
     amoyPolygon,
     ...(process.env.NEXT_PUBLIC_ENABLE_TESTNETS === 'true' ? [sepolia] : []),
   ],
